@@ -1,0 +1,33 @@
+menu "Electric Pocket Watch"
+
+    config WATCH_AWAKE_MS
+        int "Screen-on time after the last touch or button press (ms)"
+        default 10000
+
+    config WATCH_BRIGHTNESS
+        int "Display brightness while on (percent)"
+        range 5 100
+        default 80
+
+    config WATCH_SLEEP_ON_USB
+        bool "Enter light sleep even while USB power is present"
+        default n
+        help
+          Off (default): with USB/VBUS present the watch blanks the screen but keeps the CPU
+          running and polls the wake pins, so the USB serial log stays up for development.
+          On: always use real light sleep (the USB serial port is expected to drop while asleep).
+
+    config WATCH_WOM_THRESHOLD_MG
+        int "Wake-on-motion threshold (mg, 1..255)"
+        range 1 255
+        default 200
+
+    config WATCH_TAP_THRESHOLD_MG
+        int "Second-tap peak threshold (mg above 1 g)"
+        default 600
+
+    config WATCH_TAP_WINDOW_MS
+        int "Window after the motion wake in which the second tap must arrive (ms)"
+        default 700
+
+endmenu
