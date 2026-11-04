@@ -1,0 +1,35 @@
+name: build
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    container: espressif/idf:v5.5.5
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Build firmware
+        shell: bash
+        run: |
+          git config --global --add safe.directory "*"
+          . "$IDF_PATH/export.sh"
+          idf.py set-target esp32s3
+          idf.py build
+          idf.py size
+          idf.py merge-bin -o electric-pocket-watch-merged.bin
+          F=$(find . -name electric-pocket-watch-merged.bin | head -1)
+          echo "merged binary: $F"
+          cp -f "$F" firmware-merged.bin
+          ls -l firmware-merged.bin
+
+      - name: Upload firmware
+        uses: actions/upload-artifact@v4
+        with:
+          name: firmware
+          path: firmware-merged.bin
+          if-no-files-found: error
