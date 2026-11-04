@@ -1,19 +1,19 @@
 /*
- * Electric Pocket Watch - bring-up firmware v0.0.1
+ * Electric Pocket Watch - bring-up firmware v0.0.2
  *
  * Purpose: verify the real wiring of the Waveshare ESP32-S3-Touch-AMOLED-1.75C
  * before the watch firmware is written. Shows on screen and logs over USB serial:
- *   - I2C bus scan (which devices answer, at which addresses)
- *   - PCF85063 RTC time (set to the firmware build time if the RTC is invalid)
+ *   - I2C bus scan, plus a register dump of any unrecognised device
+ *   - PCF85063 RTC time if one answers at 0x51 (set to build time if invalid)
  *   - QMI8658 IMU: WHO_AM_I, live acceleration, shake/tap spike detector
  *   - BOOT button (GPIO0) presses
  *   - Candidate IMU interrupt pin (GPIO21) edge counter
- *   - TCA9554 I/O expander input port, if present (PWR button / interrupt wiring)
- *   - AXP2101 raw ID and battery percentage registers (unverified register map)
+ *   - Scan of every free GPIO for level changes (finds the PWR button / interrupt pins)
+ *   - AXP2101 raw ID, battery percentage and interrupt status registers
  *   - Touch coordinates
  *
  * Register maps for QMI8658 and PCF85063 are from the vendor datasheets;
- * the AXP2101 and TCA9554 reads are best-effort and only logged raw.
+ * AXP2101 reads are best-effort and only logged raw.
  */
 
 #include <math.h>
@@ -37,13 +37,20 @@ static const char *TAG = "pocketwatch";
 #define PIN_BOOT          GPIO_NUM_0
 #define PIN_IMU_INT2      GPIO_NUM_21   /* candidate, from the standard 1.75 reference */
 
-#define ADDR_TCA9554      0x20
 #define ADDR_AXP2101      0x34
 #define ADDR_RTC          0x51
 #define ADDR_IMU_A        0x6B
 #define ADDR_IMU_B        0x6A
 
 #define I2C_TIMEOUT_MS    100
+
+/*
+ * GPIOs not claimed by flash/PSRAM (26-37), the display (4-7, 12, 38), I2C (14, 15),
+ * touch INT (11), resets (1, 2), USB (19, 20) or the I2S/audio pins (8, 9, 10, 45, 46).
+ * Their levels are watched for changes to locate buttons and interrupt lines.
+ */
+static const int8_t SCAN_PINS[] = {3, 13, 16, 17, 18, 39, 40, 41, 42, 43, 44, 47, 48};
+#define SCAN_COUNT ((int)(sizeof(SCAN_PINS) / sizeof(SCAN_PINS[0])))
 
 /* Text shared between the monitor task and the UI loop. Tearing is harmless here. */
 static char s_time[24]  = "--:--:--";
@@ -52,7 +59,8 @@ static char s_bat[32]   = "";
 static char s_scan[160] = "I2C scanning...";
 static char s_imu[96]   = "IMU: ...";
 static char s_btn[96]   = "BOOT: ...";
-static char s_exio[64]  = "";
+static char s_gpio[96]  = "GPIO ev: -";
+static char s_axp[64]   = "";
 static char s_touch[48] = "touch: -";
 
 static volatile uint32_t s_int2_edges = 0;
@@ -98,7 +106,7 @@ static esp_err_t reg_write(i2c_master_dev_handle_t dev, uint8_t reg, const uint8
 static uint8_t bcd2bin(uint8_t v) { return (uint8_t)((v >> 4) * 10 + (v & 0x0F)); }
 static uint8_t bin2bcd(uint8_t v) { return (uint8_t)(((v / 10) << 4) | (v % 10)); }
 
-/* ---------------------------------------------------------------- RTC */
+/* ---------------------------------------------------------------- RTC (PCF85063 at 0x51) */
 
 static void build_time(uint8_t *h, uint8_t *m, uint8_t *s, uint8_t *d, uint8_t *mo, uint8_t *y)
 {
@@ -177,14 +185,42 @@ static void monitor_task(void *arg)
         }
     }
 
-    i2c_master_dev_handle_t rtc  = found[ADDR_RTC]     ? add_dev(bus, ADDR_RTC)     : NULL;
-    i2c_master_dev_handle_t axp  = found[ADDR_AXP2101] ? add_dev(bus, ADDR_AXP2101) : NULL;
-    i2c_master_dev_handle_t tca  = found[ADDR_TCA9554] ? add_dev(bus, ADDR_TCA9554) : NULL;
+    /* --- Register dump of devices we do not recognise (0x3E, 0x57 on the 1.75C) --- */
+    for (uint8_t a = 0x08; a < 0x78; a++) {
+        if (!found[a]) {
+            continue;
+        }
+        if (a == 0x18 || a == 0x34 || a == 0x40 || a == 0x51 || a == 0x5A || a == 0x6A || a == 0x6B) {
+            continue;   /* ES8311, AXP2101, ES7210, RTC, touch, IMU */
+        }
+        i2c_master_dev_handle_t d = add_dev(bus, a);
+        if (!d) {
+            continue;
+        }
+        uint8_t b[16] = {0};
+        esp_err_t e = reg_read(d, 0x00, b, sizeof(b));
+        ESP_LOGI(TAG, "unknown device 0x%02X, read regs 0x00..0x0F: %s", a, esp_err_to_name(e));
+        ESP_LOG_BUFFER_HEX(TAG, b, sizeof(b));
+    }
+
+    i2c_master_dev_handle_t rtc = found[ADDR_RTC]     ? add_dev(bus, ADDR_RTC)     : NULL;
+    i2c_master_dev_handle_t axp = found[ADDR_AXP2101] ? add_dev(bus, ADDR_AXP2101) : NULL;
     uint8_t imu_addr = found[ADDR_IMU_A] ? ADDR_IMU_A : (found[ADDR_IMU_B] ? ADDR_IMU_B : 0);
     i2c_master_dev_handle_t imu  = imu_addr ? add_dev(bus, imu_addr) : NULL;
 
-    ESP_LOGI(TAG, "present: rtc=%d axp2101=%d tca9554=%d imu=0x%02X",
-             rtc != NULL, axp != NULL, tca != NULL, imu_addr);
+    ESP_LOGI(TAG, "present: rtc@51=%d axp2101=%d imu=0x%02X", rtc != NULL, axp != NULL, imu_addr);
+    if (!rtc) {
+        snprintf(s_time, sizeof(s_time), "no RTC@51");
+    }
+
+    /* --- AXP2101: log status and interrupt-enable registers once --- */
+    if (axp) {
+        uint8_t st[2] = {0}, en[3] = {0};
+        reg_read(axp, 0x00, st, sizeof(st));
+        reg_read(axp, 0x40, en, sizeof(en));
+        ESP_LOGI(TAG, "AXP2101 status 0x00/0x01 = %02X %02X, INTEN 0x40..0x42 = %02X %02X %02X",
+                 st[0], st[1], en[0], en[1], en[2]);
+    }
 
     /* --- IMU init: accel only, +/-4g, 250 Hz normal mode --- */
     if (imu) {
@@ -216,10 +252,36 @@ static void monitor_task(void *arg)
     gpio_install_isr_service(0);
     gpio_isr_handler_add(PIN_IMU_INT2, int2_isr, NULL);
 
+    uint64_t scan_mask = 0;
+    for (int i = 0; i < SCAN_COUNT; i++) {
+        scan_mask |= 1ULL << SCAN_PINS[i];
+    }
+    gpio_config_t scan_cfg = {
+        .pin_bit_mask = scan_mask,
+        .mode = GPIO_MODE_INPUT,
+        .pull_up_en = GPIO_PULLUP_ENABLE,
+    };
+    gpio_config(&scan_cfg);
+
+    int scan_level[SCAN_COUNT];
+    int scan_cand[SCAN_COUNT];
+    int scan_cnt[SCAN_COUNT];
+    char boot_levels[160];
+    size_t bo = 0;
+    bo += snprintf(boot_levels, sizeof(boot_levels), "GPIO levels at start:");
+    for (int i = 0; i < SCAN_COUNT; i++) {
+        scan_level[i] = gpio_get_level(SCAN_PINS[i]);
+        scan_cand[i] = scan_level[i];
+        scan_cnt[i] = 0;
+        bo += snprintf(boot_levels + bo, sizeof(boot_levels) - bo, " %d=%d", SCAN_PINS[i], scan_level[i]);
+    }
+    ESP_LOGI(TAG, "%s", boot_levels);
+
     int boot_prev = gpio_get_level(PIN_BOOT);
     uint32_t boot_presses = 0;
-    uint8_t exio_prev = 0xFF;
-    bool exio_valid = false;
+
+    uint8_t axp_irq_prev[3] = {0};
+    bool axp_irq_valid = false;
 
     float peak_dev_mg = 0;
     uint32_t spikes = 0;
@@ -228,9 +290,11 @@ static void monitor_task(void *arg)
     float window_peak = 0;
     float last_window_peak = 0;
     int64_t last_slow_ms = 0;
+    uint32_t loop_n = 0;
 
     while (1) {
         int64_t now_ms = esp_timer_get_time() / 1000;
+        loop_n++;
 
         /* BOOT button */
         int lvl = gpio_get_level(PIN_BOOT);
@@ -244,16 +308,37 @@ static void monitor_task(void *arg)
         snprintf(s_btn, sizeof(s_btn), "BOOT %s n=%" PRIu32 "  INT2 edges=%" PRIu32,
                  lvl ? "up" : "DOWN", boot_presses, s_int2_edges);
 
-        /* TCA9554 input port (PWR button / interrupt lines per the standard board) */
-        if (tca) {
-            uint8_t in = 0;
-            if (reg_read(tca, 0x00, &in, 1) == ESP_OK) {
-                if (!exio_valid || in != exio_prev) {
-                    ESP_LOGI(TAG, "TCA9554 input port = 0x%02X (P4 = %d)", in, (in >> 4) & 1);
-                    exio_prev = in;
-                    exio_valid = true;
+        /* Free-GPIO scan: accept a change after 3 consecutive differing samples */
+        for (int i = 0; i < SCAN_COUNT; i++) {
+            int l = gpio_get_level(SCAN_PINS[i]);
+            if (l == scan_level[i]) {
+                scan_cnt[i] = 0;
+                continue;
+            }
+            if (l == scan_cand[i]) {
+                scan_cnt[i]++;
+            } else {
+                scan_cand[i] = l;
+                scan_cnt[i] = 1;
+            }
+            if (scan_cnt[i] >= 3) {
+                scan_level[i] = l;
+                scan_cnt[i] = 0;
+                ESP_LOGI(TAG, "GPIO%d -> %d at %" PRId64 " ms", SCAN_PINS[i], l, now_ms);
+                snprintf(s_gpio, sizeof(s_gpio), "GPIO%d -> %d @%" PRId64 "s", SCAN_PINS[i], l, now_ms / 1000);
+            }
+        }
+
+        /* AXP2101 interrupt status registers, about every 50 ms */
+        if (axp && (loop_n % 10) == 0) {
+            uint8_t irq[3] = {0};
+            if (reg_read(axp, 0x48, irq, sizeof(irq)) == ESP_OK) {
+                if (!axp_irq_valid || memcmp(irq, axp_irq_prev, sizeof(irq)) != 0) {
+                    ESP_LOGI(TAG, "AXP2101 INTSTS1..3 = %02X %02X %02X", irq[0], irq[1], irq[2]);
+                    memcpy(axp_irq_prev, irq, sizeof(irq));
+                    axp_irq_valid = true;
+                    snprintf(s_axp, sizeof(s_axp), "AXP irq %02X %02X %02X", irq[0], irq[1], irq[2]);
                 }
-                snprintf(s_exio, sizeof(s_exio), "EXIO=%02X P4=%d", in, (in >> 4) & 1);
             }
         }
 
@@ -316,8 +401,9 @@ static lv_obj_t *s_lbl_date;
 static lv_obj_t *s_lbl_scan;
 static lv_obj_t *s_lbl_imu;
 static lv_obj_t *s_lbl_btn;
-static lv_obj_t *s_lbl_exio;
+static lv_obj_t *s_lbl_gpio;
 static lv_obj_t *s_lbl_touch;
+static lv_obj_t *s_lbl_axp;
 
 static lv_obj_t *make_label(const lv_font_t *font, int y_offset, int width)
 {
@@ -355,8 +441,9 @@ static void build_ui(void)
     s_lbl_scan  = make_label(&lv_font_montserrat_14,  -30, 300);
     s_lbl_imu   = make_label(&lv_font_montserrat_14,   20, 300);
     s_lbl_btn   = make_label(&lv_font_montserrat_14,   70, 300);
-    s_lbl_exio  = make_label(&lv_font_montserrat_14,  100, 300);
+    s_lbl_gpio  = make_label(&lv_font_montserrat_14,  100, 300);
     s_lbl_touch = make_label(&lv_font_montserrat_14,  130, 300);
+    s_lbl_axp   = make_label(&lv_font_montserrat_14,  160, 300);
 }
 
 static void update_ui(void)
@@ -368,13 +455,14 @@ static void update_ui(void)
     lv_label_set_text(s_lbl_scan, s_scan);
     lv_label_set_text(s_lbl_imu, s_imu);
     lv_label_set_text(s_lbl_btn, s_btn);
-    lv_label_set_text(s_lbl_exio, s_exio);
+    lv_label_set_text(s_lbl_gpio, s_gpio);
     lv_label_set_text(s_lbl_touch, s_touch);
+    lv_label_set_text(s_lbl_axp, s_axp);
 }
 
 void app_main(void)
 {
-    ESP_LOGI(TAG, "Electric Pocket Watch bring-up v0.0.1 (built %s %s)", __DATE__, __TIME__);
+    ESP_LOGI(TAG, "Electric Pocket Watch bring-up v0.0.2 (built %s %s)", __DATE__, __TIME__);
 
     ESP_ERROR_CHECK(bsp_i2c_init());
 
