@@ -1,5 +1,7 @@
 /*
- * Electric Pocket Watch - bring-up firmware v0.0.4
+ * Electric Pocket Watch - bring-up firmware v0.0.5
+ *
+ * v0.0.5: QMI8658 INT2 output actually enabled (CTRL1 bit4), GPIO21 pulled down.
  *
  * v0.0.4: boot findings reprinted every 10 s (capture the log any time), INT2 edge
  * rate per second, BOOT cycles IMU 250 Hz / 125 Hz / off, raw PMIC rail registers.
@@ -360,9 +362,17 @@ static void monitor_task(void *arg)
         uint8_t who = 0;
         reg_read(imu, 0x00, &who, 1);
         bootf("QMI8658 WHO_AM_I = 0x%02X (expect 0x05)", who);
-        uint8_t v = 0x40;               /* CTRL1: address auto-increment */
+        /* CTRL1: bit6 address auto-increment, bit4 INT2 output enable (bit3 would be INT1).
+         * Bit positions from SensorLib SensorQMI8658.hpp enableINT(); v0.0.4 left INT2
+         * disabled, so GPIO21 floated and its edge counts were noise. */
+        uint8_t v = 0x40 | 0x10;
         reg_write(imu, 0x02, &v, 1);
-        imu_mode_name = imu_set_mode(imu, imu_mode);   /* 250 Hz, +/-4g, accel on */
+        imu_mode_name = imu_set_mode(imu, imu_mode);   /* 250 Hz, +/-4g, accel on; CTRL7 bit5=0 -> DRDY on */
+        uint8_t rb[3] = {0};
+        reg_read(imu, 0x02, &rb[0], 1);
+        reg_read(imu, 0x03, &rb[1], 1);
+        reg_read(imu, 0x08, &rb[2], 1);
+        bootf("QMI8658 CTRL1/CTRL2/CTRL7 readback = %02X %02X %02X", rb[0], rb[1], rb[2]);
     }
 
     /* --- GPIOs --- */
@@ -376,6 +386,7 @@ static void monitor_task(void *arg)
     gpio_config_t int2_cfg = {
         .pin_bit_mask = 1ULL << PIN_IMU_INT2,
         .mode = GPIO_MODE_INPUT,
+        .pull_down_en = GPIO_PULLDOWN_ENABLE,   /* stop a floating pin counting noise */
         .intr_type = GPIO_INTR_ANYEDGE,
     };
     gpio_config(&int2_cfg);
@@ -577,7 +588,7 @@ static void monitor_task(void *arg)
                         *c = ' ';
                     }
                 }
-                ESP_LOGW(TAG, "==== summary at %" PRId64 " s (v0.0.4) ====\n%s"
+                ESP_LOGW(TAG, "==== summary at %" PRId64 " s (v0.0.5) ====\n%s"
                          "state: %s | %s | %s | %s | IMU %s INT2 %" PRIu32 "/s tot=%" PRIu32,
                          now_ms / 1000, s_boot_log, s_scan, s_gpio, s_low, now_axp,
                          imu_mode_name, int2_rate, s_int2_edges);
@@ -668,7 +679,7 @@ static void update_ui(void)
 
 void app_main(void)
 {
-    ESP_LOGI(TAG, "Electric Pocket Watch bring-up v0.0.4 (built %s %s)", __DATE__, __TIME__);
+    ESP_LOGI(TAG, "Electric Pocket Watch bring-up v0.0.5 (built %s %s)", __DATE__, __TIME__);
 
     ESP_ERROR_CHECK(bsp_i2c_init());
 
