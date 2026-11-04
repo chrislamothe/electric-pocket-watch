@@ -1,6 +1,7 @@
 /*
- * Electric Pocket Watch - bring-up firmware v0.0.7
+ * Electric Pocket Watch - bring-up firmware v0.0.8
  *
+ * v0.0.8: starts in wake-on-motion; logs INT1 edge changes (for serial-log test).
  * v0.0.7: IMU soft reset at init + CTRL8 handshake type (v0.0.6 left the IMU stuck).
  * v0.0.6: schematic-informed. QMI8658 INT1 (-> GPIO21) enabled, BOOT cycles
  *   250 Hz / wake-on-motion / off. PWR key = GPIO3 (high while pressed).
@@ -403,7 +404,7 @@ static void monitor_task(void *arg)
     }
 
     /* --- IMU init: accel only, +/-4g, 250 Hz normal mode --- */
-    int imu_mode = 0;
+    int imu_mode = IMU_WOM_MODE;     /* v0.0.8: start in wake-on-motion so no button press is needed */
     const char *imu_mode_name = "none";
     if (imu) {
         uint8_t who = 0;
@@ -647,6 +648,10 @@ static void monitor_task(void *arg)
             uint32_t edges_now = s_int2_edges;
             int2_rate = edges_now - int2_prev;
             int2_prev = edges_now;
+            if (int2_rate) {
+                ESP_LOGW(TAG, "INT1 (GPIO21) edges: +%" PRIu32 " in last 1 s, total %" PRIu32 ", WoM events %" PRIu32 ", IMU %s",
+                         int2_rate, edges_now, wom_events, imu_mode_name);
+            }
             if (++sec_n % 10 == 0) {
                 /* Reprint everything learned at boot plus the current state */
                 char now_axp[96];
@@ -656,7 +661,7 @@ static void monitor_task(void *arg)
                         *c = ' ';
                     }
                 }
-                ESP_LOGW(TAG, "==== summary at %" PRId64 " s (v0.0.7) ====\n%s"
+                ESP_LOGW(TAG, "==== summary at %" PRId64 " s (v0.0.8) ====\n%s"
                          "state: %s | %s | %s | %s | IMU %s INT1 %" PRIu32 "/s tot=%" PRIu32 " wom=%" PRIu32,
                          now_ms / 1000, s_boot_log, s_scan, s_gpio, s_low, now_axp,
                          imu_mode_name, int2_rate, s_int2_edges, wom_events);
@@ -747,7 +752,7 @@ static void update_ui(void)
 
 void app_main(void)
 {
-    ESP_LOGI(TAG, "Electric Pocket Watch bring-up v0.0.7 (built %s %s)", __DATE__, __TIME__);
+    ESP_LOGI(TAG, "Electric Pocket Watch bring-up v0.0.8 (built %s %s)", __DATE__, __TIME__);
 
     ESP_ERROR_CHECK(bsp_i2c_init());
 
