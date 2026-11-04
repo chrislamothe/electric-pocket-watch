@@ -1,5 +1,8 @@
 /*
- * Electric Pocket Watch - bring-up firmware v0.0.3
+ * Electric Pocket Watch - bring-up firmware v0.0.4
+ *
+ * v0.0.4: boot findings reprinted every 10 s (capture the log any time), INT2 edge
+ * rate per second, BOOT cycles IMU 250 Hz / 125 Hz / off, raw PMIC rail registers.
  *
  * Purpose: verify the real wiring of the Waveshare ESP32-S3-Touch-AMOLED-1.75C
  * before the watch firmware is written. Shows on screen and logs over USB serial:
@@ -21,6 +24,7 @@
  */
 
 #include <math.h>
+#include <stdarg.h>
 #include <stdio.h>
 #include <string.h>
 #include <inttypes.h>
@@ -73,6 +77,40 @@ static volatile uint32_t s_int2_edges = 0;
 static void IRAM_ATTR int2_isr(void *arg)
 {
     s_int2_edges++;
+}
+
+/*
+ * Boot-time findings are logged once and also kept in a buffer that is reprinted
+ * every 10 s, so a serial capture started at any time still contains them.
+ */
+static char s_boot_log[2048];
+static size_t s_boot_len = 0;
+
+static void bootf(const char *fmt, ...)
+{
+    char line[160];
+    va_list ap;
+    va_start(ap, fmt);
+    vsnprintf(line, sizeof(line), fmt, ap);
+    va_end(ap);
+    ESP_LOGI(TAG, "%s", line);
+    size_t n = strlen(line);
+    if (s_boot_len + n + 2 < sizeof(s_boot_log)) {
+        memcpy(s_boot_log + s_boot_len, line, n);
+        s_boot_len += n;
+        s_boot_log[s_boot_len++] = '\n';
+        s_boot_log[s_boot_len] = '\0';
+    }
+}
+
+static void bootf_hex(const char *label, const uint8_t *b, size_t n)
+{
+    char line[160];
+    size_t o = (size_t)snprintf(line, sizeof(line), "%s:", label);
+    for (size_t i = 0; i < n && o < sizeof(line) - 4; i++) {
+        o += (size_t)snprintf(line + o, sizeof(line) - o, " %02X", b[i]);
+    }
+    bootf("%s", line);
 }
 
 /* ---------------------------------------------------------------- I2C helpers */
@@ -170,6 +208,35 @@ static void rtc_poll(i2c_master_dev_handle_t rtc)
     snprintf(s_date, sizeof(s_date), "20%02u-%02u-%02u", yr, mon, day);
 }
 
+/* ---------------------------------------------------------------- IMU modes */
+
+/* BOOT cycles the accelerometer: 250 Hz -> 125 Hz -> off. If the GPIO21 edge rate
+ * follows the sample rate, GPIO21 is driven by the IMU. */
+#define IMU_MODES 3
+
+static const char *imu_set_mode(i2c_master_dev_handle_t imu, int mode)
+{
+    uint8_t v;
+    switch (mode) {
+    case 0:
+        v = 0x15;                       /* CTRL2: +/-4g, aODR 250 Hz */
+        reg_write(imu, 0x03, &v, 1);
+        v = 0x01;                       /* CTRL7: accel enable */
+        reg_write(imu, 0x08, &v, 1);
+        return "250Hz";
+    case 1:
+        v = 0x16;                       /* CTRL2: +/-4g, aODR 125 Hz */
+        reg_write(imu, 0x03, &v, 1);
+        v = 0x01;
+        reg_write(imu, 0x08, &v, 1);
+        return "125Hz";
+    default:
+        v = 0x00;                       /* CTRL7: all sensors disabled */
+        reg_write(imu, 0x08, &v, 1);
+        return "off";
+    }
+}
+
 /* ---------------------------------------------------------------- I2C scanning */
 
 static bool is_known_addr(uint8_t a)
@@ -193,8 +260,9 @@ static void dump_unknown(i2c_master_bus_handle_t bus, uint8_t a)
     }
     uint8_t b[16] = {0};
     esp_err_t e = reg_read(d, 0x00, b, sizeof(b));
-    ESP_LOGI(TAG, "unknown device 0x%02X, read regs 0x00..0x0F: %s", a, esp_err_to_name(e));
-    ESP_LOG_BUFFER_HEX(TAG, b, sizeof(b));
+    char label[64];
+    snprintf(label, sizeof(label), "unknown device 0x%02X regs 0x00..0x0F (%s)", a, esp_err_to_name(e));
+    bootf_hex(label, b, sizeof(b));
     i2c_master_bus_rm_device(d);
 }
 
@@ -228,7 +296,7 @@ static void monitor_task(void *arg)
     for (uint8_t a = 0x08; a < 0x78; a++) {
         if (found[a]) {
             ever[a] = 1;
-            ESP_LOGI(TAG, "I2C device at 0x%02X", a);
+            bootf("I2C device at 0x%02X", a);
         }
     }
     format_scan(found, ever);
@@ -245,7 +313,7 @@ static void monitor_task(void *arg)
     uint8_t imu_addr = found[ADDR_IMU_A] ? ADDR_IMU_A : (found[ADDR_IMU_B] ? ADDR_IMU_B : 0);
     i2c_master_dev_handle_t imu  = imu_addr ? add_dev(bus, imu_addr) : NULL;
 
-    ESP_LOGI(TAG, "present: rtc@51=%d axp2101=%d imu=0x%02X", rtc != NULL, axp != NULL, imu_addr);
+    bootf("present: rtc@51=%d axp2101=%d imu=0x%02X", rtc != NULL, axp != NULL, imu_addr);
     if (!rtc) {
         snprintf(s_time, sizeof(s_time), "no RTC@51");
     }
@@ -255,39 +323,46 @@ static void monitor_task(void *arg)
         uint8_t st[2] = {0}, en[3] = {0};
         reg_read(axp, 0x00, st, sizeof(st));
         reg_read(axp, 0x40, en, sizeof(en));
-        ESP_LOGI(TAG, "AXP2101 status 0x00/0x01 = %02X %02X, INTEN 0x40..0x42 = %02X %02X %02X",
-                 st[0], st[1], en[0], en[1], en[2]);
+        bootf("AXP2101 status 0x00/0x01 = %02X %02X, INTEN 0x40..0x42 = %02X %02X %02X",
+              st[0], st[1], en[0], en[1], en[2]);
+
+        /* Raw dump of the PMIC regulator control block (0x80..0x9F). Not decoded here:
+         * used to compare rail state between boots (do 0x3E/0x57 sit on a switched rail?). */
+        uint8_t rail[32] = {0};
+        esp_err_t er = reg_read(axp, 0x80, rail, sizeof(rail));
+        bootf("AXP2101 regs 0x80..0x9F read: %s", esp_err_to_name(er));
+        bootf_hex("AXP 0x80..0x8F", rail, 16);
+        bootf_hex("AXP 0x90..0x9F", rail + 16, 16);
 
         /* Enable the power-key IRQs so the PMIC IRQ line (if it reaches the ESP32)
          * asserts on a PWR press: 0x41 bit0 = PWR_ON positive edge, bit1 = negative
          * edge (Zephyr mfd_axp2101), bit3 = short press (docs.rs axp2101-embedded). */
         uint8_t en1 = (uint8_t)(en[1] | 0x0B);
         esp_err_t e1 = reg_write(axp, 0x41, &en1, 1);
-        ESP_LOGI(TAG, "AXP2101 INTEN1 0x41 -> %02X: %s", en1, esp_err_to_name(e1));
+        bootf("AXP2101 INTEN1 0x41 -> %02X: %s", en1, esp_err_to_name(e1));
 
         /* Clear any latched status (write 1 to clear) so the IRQ line starts released. */
         uint8_t pre[3] = {0};
         reg_read(axp, 0x48, pre, sizeof(pre));
-        ESP_LOGI(TAG, "AXP2101 INTSTS1..3 at start = %02X %02X %02X (clearing)", pre[0], pre[1], pre[2]);
+        bootf("AXP2101 INTSTS1..3 at start = %02X %02X %02X (clearing)", pre[0], pre[1], pre[2]);
         for (uint8_t r = 0; r < 3; r++) {
             uint8_t ff = 0xFF;
             reg_write(axp, (uint8_t)(0x48 + r), &ff, 1);
         }
         reg_read(axp, 0x48, pre, sizeof(pre));
-        ESP_LOGI(TAG, "AXP2101 INTSTS1..3 after clear = %02X %02X %02X", pre[0], pre[1], pre[2]);
+        bootf("AXP2101 INTSTS1..3 after clear = %02X %02X %02X", pre[0], pre[1], pre[2]);
     }
 
     /* --- IMU init: accel only, +/-4g, 250 Hz normal mode --- */
+    int imu_mode = 0;
+    const char *imu_mode_name = "none";
     if (imu) {
         uint8_t who = 0;
         reg_read(imu, 0x00, &who, 1);
-        ESP_LOGI(TAG, "QMI8658 WHO_AM_I = 0x%02X (expect 0x05)", who);
+        bootf("QMI8658 WHO_AM_I = 0x%02X (expect 0x05)", who);
         uint8_t v = 0x40;               /* CTRL1: address auto-increment */
         reg_write(imu, 0x02, &v, 1);
-        v = 0x15;                       /* CTRL2: aFS=+/-4g (001), aODR=250Hz (0101) */
-        reg_write(imu, 0x03, &v, 1);
-        v = 0x01;                       /* CTRL7: accel enable */
-        reg_write(imu, 0x08, &v, 1);
+        imu_mode_name = imu_set_mode(imu, imu_mode);   /* 250 Hz, +/-4g, accel on */
     }
 
     /* --- GPIOs --- */
@@ -330,7 +405,7 @@ static void monitor_task(void *arg)
         scan_cnt[i] = 0;
         bo += snprintf(boot_levels + bo, sizeof(boot_levels) - bo, " %d=%d", SCAN_PINS[i], scan_level[i]);
     }
-    ESP_LOGI(TAG, "%s", boot_levels);
+    bootf("%s", boot_levels);
 
     int boot_prev = gpio_get_level(PIN_BOOT);
     uint32_t boot_presses = 0;
@@ -347,6 +422,7 @@ static void monitor_task(void *arg)
     float last_window_peak = 0;
     int64_t last_slow_ms = 0;
     uint32_t loop_n = 0;
+    uint32_t int2_rate = 0, int2_prev = 0, sec_n = 0;
 
     while (1) {
         int64_t now_ms = esp_timer_get_time() / 1000;
@@ -358,11 +434,16 @@ static void monitor_task(void *arg)
             boot_prev = lvl;
             if (lvl == 0) {
                 boot_presses++;
+                if (imu) {
+                    imu_mode = (imu_mode + 1) % IMU_MODES;
+                    imu_mode_name = imu_set_mode(imu, imu_mode);
+                    ESP_LOGW(TAG, "IMU mode -> %s", imu_mode_name);
+                }
             }
             ESP_LOGI(TAG, "BOOT %s (presses=%" PRIu32 ")", lvl ? "released" : "pressed", boot_presses);
         }
-        snprintf(s_btn, sizeof(s_btn), "BOOT %s n=%" PRIu32 "  INT2 edges=%" PRIu32,
-                 lvl ? "up" : "DOWN", boot_presses, s_int2_edges);
+        snprintf(s_btn, sizeof(s_btn), "BOOT n=%" PRIu32 "  IMU %s\nINT2 %" PRIu32 "/s  tot=%" PRIu32,
+                 boot_presses, imu_mode_name, int2_rate, s_int2_edges);
 
         /* Free-GPIO scan: accept a change after 3 consecutive differing samples */
         for (int i = 0; i < SCAN_COUNT; i++) {
@@ -446,7 +527,9 @@ static void monitor_task(void *arg)
         }
 
         /* IMU */
-        if (imu) {
+        if (imu && imu_mode == IMU_MODES - 1) {
+            snprintf(s_imu, sizeof(s_imu), "IMU accel OFF (BOOT = next mode)");
+        } else if (imu) {
             uint8_t a[6];
             if (reg_read(imu, 0x35, a, sizeof(a)) == ESP_OK) {
                 int16_t rx = (int16_t)((a[1] << 8) | a[0]);
@@ -481,6 +564,24 @@ static void monitor_task(void *arg)
         /* Slow poll once per second: RTC and PMIC */
         if (now_ms - last_slow_ms >= 1000) {
             last_slow_ms = now_ms;
+
+            uint32_t edges_now = s_int2_edges;
+            int2_rate = edges_now - int2_prev;
+            int2_prev = edges_now;
+            if (++sec_n % 10 == 0) {
+                /* Reprint everything learned at boot plus the current state */
+                char now_axp[96];
+                snprintf(now_axp, sizeof(now_axp), "%s", s_axp);
+                for (char *c = now_axp; *c; c++) {
+                    if (*c == '\n') {
+                        *c = ' ';
+                    }
+                }
+                ESP_LOGW(TAG, "==== summary at %" PRId64 " s (v0.0.4) ====\n%s"
+                         "state: %s | %s | %s | %s | IMU %s INT2 %" PRIu32 "/s tot=%" PRIu32,
+                         now_ms / 1000, s_boot_log, s_scan, s_gpio, s_low, now_axp,
+                         imu_mode_name, int2_rate, s_int2_edges);
+            }
             if (rtc) {
                 rtc_poll(rtc);
             }
@@ -567,7 +668,7 @@ static void update_ui(void)
 
 void app_main(void)
 {
-    ESP_LOGI(TAG, "Electric Pocket Watch bring-up v0.0.3 (built %s %s)", __DATE__, __TIME__);
+    ESP_LOGI(TAG, "Electric Pocket Watch bring-up v0.0.4 (built %s %s)", __DATE__, __TIME__);
 
     ESP_ERROR_CHECK(bsp_i2c_init());
 
@@ -583,7 +684,7 @@ void app_main(void)
         bsp_display_unlock();
     }
 
-    xTaskCreate(monitor_task, "monitor", 6144, NULL, 5, NULL);
+    xTaskCreate(monitor_task, "monitor", 8192, NULL, 5, NULL);
 
     while (1) {
         if (bsp_display_lock(100) == ESP_OK) {
