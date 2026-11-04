@@ -1,7 +1,9 @@
 /*
- * Electric Pocket Watch - bring-up firmware v0.0.5
+ * Electric Pocket Watch - bring-up firmware v0.0.6
  *
- * v0.0.5: QMI8658 INT2 output actually enabled (CTRL1 bit4), GPIO21 pulled down.
+ * v0.0.6: schematic-informed. QMI8658 INT1 (-> GPIO21) enabled, BOOT cycles
+ *   250 Hz / wake-on-motion / off. PWR key = GPIO3 (high while pressed).
+ * v0.0.5: QMI8658 INT2 output enabled (INT2 is not connected on the 1.75C).
  *
  * v0.0.4: boot findings reprinted every 10 s (capture the log any time), INT2 edge
  * rate per second, BOOT cycles IMU 250 Hz / 125 Hz / off, raw PMIC rail registers.
@@ -45,7 +47,7 @@
 static const char *TAG = "pocketwatch";
 
 #define PIN_BOOT          GPIO_NUM_0
-#define PIN_IMU_INT2      GPIO_NUM_21   /* candidate, from the standard 1.75 reference */
+#define PIN_IMU_INT2      GPIO_NUM_21   /* QMI8658 INT1 net, per the 1.75C schematic (name kept from v0.0.1) */
 
 #define ADDR_AXP2101      0x34
 #define ADDR_RTC          0x51
@@ -212,30 +214,72 @@ static void rtc_poll(i2c_master_dev_handle_t rtc)
 
 /* ---------------------------------------------------------------- IMU modes */
 
-/* BOOT cycles the accelerometer: 250 Hz -> 125 Hz -> off. If the GPIO21 edge rate
- * follows the sample rate, GPIO21 is driven by the IMU. */
-#define IMU_MODES 3
+/*
+ * BOOT cycles the IMU: 250 Hz normal (INT1 enabled, no event source) -> wake-on-motion
+ * (low-power 128 Hz, INT1) -> off. The 1.75C schematic routes QMI8658 INT1 to GPIO21;
+ * INT2 is not connected. WoM sequence follows SensorLib configWakeOnMotion():
+ * CTRL7 off, CTRL2 range/ODR, CAL1_L = threshold (mg), CAL1_H = bit7 initial INT level |
+ * bit6 pin select (0 = INT1) | blanking samples, CTRL9 command 0x08 with STATUSINT bit7
+ * handshake, then accel on. WoM event flag = STATUS1 (0x2F) bit2 (SensorLib update()).
+ */
+#define IMU_MODES        3
+#define IMU_WOM_MODE     1
+#define WOM_THRESHOLD_MG 100
+#define WOM_BLANKING     0x20
+
+static bool qmi_ctrl9(i2c_master_dev_handle_t imu, uint8_t cmd)
+{
+    uint8_t v = cmd, st = 0;
+    if (reg_write(imu, 0x0A, &v, 1) != ESP_OK) {
+        return false;
+    }
+    for (int i = 0; i < 100; i++) {                 /* wait for STATUSINT bit7 = 1 */
+        if (reg_read(imu, 0x2D, &st, 1) == ESP_OK && (st & 0x80)) {
+            break;
+        }
+        vTaskDelay(pdMS_TO_TICKS(2));
+    }
+    if (!(st & 0x80)) {
+        return false;
+    }
+    v = 0x00;                                       /* CTRL_CMD_ACK */
+    reg_write(imu, 0x0A, &v, 1);
+    for (int i = 0; i < 100; i++) {                 /* wait for STATUSINT bit7 = 0 */
+        if (reg_read(imu, 0x2D, &st, 1) == ESP_OK && !(st & 0x80)) {
+            return true;
+        }
+        vTaskDelay(pdMS_TO_TICKS(2));
+    }
+    return false;
+}
 
 static const char *imu_set_mode(i2c_master_dev_handle_t imu, int mode)
 {
-    uint8_t v;
+    uint8_t v = 0x00;
+    reg_write(imu, 0x08, &v, 1);                    /* CTRL7: everything off while reconfiguring */
     switch (mode) {
     case 0:
-        v = 0x15;                       /* CTRL2: +/-4g, aODR 250 Hz */
+        v = 0x15;                                   /* CTRL2: +/-4g, aODR 250 Hz */
         reg_write(imu, 0x03, &v, 1);
-        v = 0x01;                       /* CTRL7: accel enable */
+        v = 0x01;                                   /* CTRL7: accel enable */
         reg_write(imu, 0x08, &v, 1);
         return "250Hz";
-    case 1:
-        v = 0x16;                       /* CTRL2: +/-4g, aODR 125 Hz */
+    case IMU_WOM_MODE: {
+        v = 0x1C;                                   /* CTRL2: +/-4g, aODR 1100 = low-power 128 Hz */
         reg_write(imu, 0x03, &v, 1);
+        v = WOM_THRESHOLD_MG;                       /* CAL1_L: threshold, 1 mg/LSB */
+        reg_write(imu, 0x0B, &v, 1);
+        v = WOM_BLANKING;                           /* CAL1_H: INT1, initial level low, blanking */
+        reg_write(imu, 0x0C, &v, 1);
+        bool ok = qmi_ctrl9(imu, 0x08);             /* CTRL_CMD_WRITE_WOM_SETTING */
+        ESP_LOGW(TAG, "QMI8658 WoM setup (threshold %d mg): CTRL9 handshake %s",
+                 WOM_THRESHOLD_MG, ok ? "ok" : "FAILED");
         v = 0x01;
         reg_write(imu, 0x08, &v, 1);
-        return "125Hz";
+        return ok ? "WoM" : "WoM-FAIL";
+    }
     default:
-        v = 0x00;                       /* CTRL7: all sensors disabled */
-        reg_write(imu, 0x08, &v, 1);
-        return "off";
+        return "off";                               /* CTRL7 already 0 */
     }
 }
 
@@ -362,10 +406,10 @@ static void monitor_task(void *arg)
         uint8_t who = 0;
         reg_read(imu, 0x00, &who, 1);
         bootf("QMI8658 WHO_AM_I = 0x%02X (expect 0x05)", who);
-        /* CTRL1: bit6 address auto-increment, bit4 INT2 output enable (bit3 would be INT1).
-         * Bit positions from SensorLib SensorQMI8658.hpp enableINT(); v0.0.4 left INT2
-         * disabled, so GPIO21 floated and its edge counts were noise. */
-        uint8_t v = 0x40 | 0x10;
+        /* CTRL1: bit6 address auto-increment, bit3 INT1 output enable (bit4 = INT2, which
+         * the 1.75C schematic leaves unconnected). Bit positions from SensorLib
+         * SensorQMI8658.hpp enableINT(). */
+        uint8_t v = 0x40 | 0x08;
         reg_write(imu, 0x02, &v, 1);
         imu_mode_name = imu_set_mode(imu, imu_mode);   /* 250 Hz, +/-4g, accel on; CTRL7 bit5=0 -> DRDY on */
         uint8_t rb[3] = {0};
@@ -433,7 +477,7 @@ static void monitor_task(void *arg)
     float last_window_peak = 0;
     int64_t last_slow_ms = 0;
     uint32_t loop_n = 0;
-    uint32_t int2_rate = 0, int2_prev = 0, sec_n = 0;
+    uint32_t int2_rate = 0, int2_prev = 0, sec_n = 0, wom_events = 0;
 
     while (1) {
         int64_t now_ms = esp_timer_get_time() / 1000;
@@ -453,8 +497,8 @@ static void monitor_task(void *arg)
             }
             ESP_LOGI(TAG, "BOOT %s (presses=%" PRIu32 ")", lvl ? "released" : "pressed", boot_presses);
         }
-        snprintf(s_btn, sizeof(s_btn), "BOOT n=%" PRIu32 "  IMU %s\nINT2 %" PRIu32 "/s  tot=%" PRIu32,
-                 boot_presses, imu_mode_name, int2_rate, s_int2_edges);
+        snprintf(s_btn, sizeof(s_btn), "BOOT n=%" PRIu32 "  IMU %s\nINT1(G21) %" PRIu32 "/s tot=%" PRIu32 " wom=%" PRIu32,
+                 boot_presses, imu_mode_name, int2_rate, s_int2_edges, wom_events);
 
         /* Free-GPIO scan: accept a change after 3 consecutive differing samples */
         for (int i = 0; i < SCAN_COUNT; i++) {
@@ -488,8 +532,10 @@ static void monitor_task(void *arg)
                 }
             }
             if (!any) {
-                snprintf(s_low + lo, sizeof(s_low) - lo, " none");
+                lo += (size_t)snprintf(s_low + lo, sizeof(s_low) - lo, " none");
             }
+            /* SYS_OUT (GPIO3) is the inverted PWR key: low when idle, high while held */
+            snprintf(s_low + lo, sizeof(s_low) - lo, "  PWR %s", gpio_get_level(GPIO_NUM_3) ? "HELD" : "idle");
         }
 
         /* AXP2101 interrupt status: read, count, log, then clear (write 1 to clear) */
@@ -538,6 +584,14 @@ static void monitor_task(void *arg)
         }
 
         /* IMU */
+        if (imu && imu_mode == IMU_WOM_MODE && (loop_n % 2) == 0) {
+            uint8_t st[3] = {0};                    /* STATUSINT, STATUS0, STATUS1 */
+            if (reg_read(imu, 0x2D, st, sizeof(st)) == ESP_OK && (st[2] & 0x04)) {
+                wom_events++;
+                ESP_LOGI(TAG, "QMI8658 WoM event #%" PRIu32 " at %" PRId64 " ms, GPIO21=%d",
+                         wom_events, now_ms, gpio_get_level(PIN_IMU_INT2));
+            }
+        }
         if (imu && imu_mode == IMU_MODES - 1) {
             snprintf(s_imu, sizeof(s_imu), "IMU accel OFF (BOOT = next mode)");
         } else if (imu) {
@@ -588,10 +642,10 @@ static void monitor_task(void *arg)
                         *c = ' ';
                     }
                 }
-                ESP_LOGW(TAG, "==== summary at %" PRId64 " s (v0.0.5) ====\n%s"
-                         "state: %s | %s | %s | %s | IMU %s INT2 %" PRIu32 "/s tot=%" PRIu32,
+                ESP_LOGW(TAG, "==== summary at %" PRId64 " s (v0.0.6) ====\n%s"
+                         "state: %s | %s | %s | %s | IMU %s INT1 %" PRIu32 "/s tot=%" PRIu32 " wom=%" PRIu32,
                          now_ms / 1000, s_boot_log, s_scan, s_gpio, s_low, now_axp,
-                         imu_mode_name, int2_rate, s_int2_edges);
+                         imu_mode_name, int2_rate, s_int2_edges, wom_events);
             }
             if (rtc) {
                 rtc_poll(rtc);
@@ -679,7 +733,7 @@ static void update_ui(void)
 
 void app_main(void)
 {
-    ESP_LOGI(TAG, "Electric Pocket Watch bring-up v0.0.5 (built %s %s)", __DATE__, __TIME__);
+    ESP_LOGI(TAG, "Electric Pocket Watch bring-up v0.0.6 (built %s %s)", __DATE__, __TIME__);
 
     ESP_ERROR_CHECK(bsp_i2c_init());
 
