@@ -1,0 +1,61 @@
+name: discover-bsp
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+
+jobs:
+  discover:
+    runs-on: ubuntu-latest
+    container: espressif/idf:v5.5.5
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Resolve components
+        shell: bash
+        run: |
+          git config --global --add safe.directory "*"
+          . "$IDF_PATH/export.sh"
+          idf.py set-target esp32s3
+          idf.py reconfigure
+
+      - name: Component tree
+        shell: bash
+        run: |
+          ls managed_components
+          cat dependencies.lock
+
+      - name: Dump BSP manifest and headers
+        shell: bash
+        run: |
+          B=managed_components/waveshare__esp32_s3_touch_amoled_1_75c
+          find "$B" -type f | sort
+          echo "=== BSP manifest ==="
+          cat "$B/idf_component.yml"
+          for f in $(find "$B" -name '*.h' | sort); do
+            echo "=== $f ==="
+            cat "$f"
+          done
+
+      - name: Dump BSP sources
+        shell: bash
+        run: |
+          B=managed_components/waveshare__esp32_s3_touch_amoled_1_75c
+          for f in $(find "$B" -name '*.c' | sort); do
+            echo "=== $f ==="
+            cat "$f"
+          done
+
+      - name: Build
+        shell: bash
+        run: |
+          . "$IDF_PATH/export.sh"
+          idf.py build
+
+      - name: Upload BSP source
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: bsp-source
+          path: managed_components/waveshare__esp32_s3_touch_amoled_1_75c
