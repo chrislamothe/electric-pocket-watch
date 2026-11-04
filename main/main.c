@@ -1,9 +1,13 @@
 /*
- * Electric Pocket Watch - bring-up firmware v0.0.2
+ * Electric Pocket Watch - bring-up firmware v0.0.3
  *
  * Purpose: verify the real wiring of the Waveshare ESP32-S3-Touch-AMOLED-1.75C
  * before the watch firmware is written. Shows on screen and logs over USB serial:
- *   - I2C bus scan, plus a register dump of any unrecognised device
+ *   - I2C bus scan (repeated every 5 s, changes logged), plus a register dump of
+ *     any unrecognised device
+ *   - AXP2101 interrupt status: power-key IRQs enabled, status cleared after each
+ *     read (write-1-to-clear), press/release/short counters, live GPIO3 level
+ *     (hypothesis: GPIO3 is the PMIC IRQ line)
  *   - PCF85063 RTC time if one answers at 0x51 (set to build time if invalid)
  *   - QMI8658 IMU: WHO_AM_I, live acceleration, shake/tap spike detector
  *   - BOOT button (GPIO0) presses
@@ -60,7 +64,8 @@ static char s_scan[160] = "I2C scanning...";
 static char s_imu[96]   = "IMU: ...";
 static char s_btn[96]   = "BOOT: ...";
 static char s_gpio[96]  = "GPIO ev: -";
-static char s_axp[64]   = "";
+static char s_low[64]   = "";
+static char s_axp[96]   = "";
 static char s_touch[48] = "touch: -";
 
 static volatile uint32_t s_int2_edges = 0;
@@ -165,42 +170,74 @@ static void rtc_poll(i2c_master_dev_handle_t rtc)
     snprintf(s_date, sizeof(s_date), "20%02u-%02u-%02u", yr, mon, day);
 }
 
+/* ---------------------------------------------------------------- I2C scanning */
+
+static bool is_known_addr(uint8_t a)
+{
+    /* ES8311, AXP2101, ES7210, RTC, touch, IMU */
+    return a == 0x18 || a == 0x34 || a == 0x40 || a == 0x51 || a == 0x5A || a == 0x6A || a == 0x6B;
+}
+
+static void scan_bus(i2c_master_bus_handle_t bus, uint8_t *found)
+{
+    for (uint8_t a = 0x08; a < 0x78; a++) {
+        found[a] = (i2c_master_probe(bus, a, 20) == ESP_OK) ? 1 : 0;
+    }
+}
+
+static void dump_unknown(i2c_master_bus_handle_t bus, uint8_t a)
+{
+    i2c_master_dev_handle_t d = add_dev(bus, a);
+    if (!d) {
+        return;
+    }
+    uint8_t b[16] = {0};
+    esp_err_t e = reg_read(d, 0x00, b, sizeof(b));
+    ESP_LOGI(TAG, "unknown device 0x%02X, read regs 0x00..0x0F: %s", a, esp_err_to_name(e));
+    ESP_LOG_BUFFER_HEX(TAG, b, sizeof(b));
+    i2c_master_bus_rm_device(d);
+}
+
+static void format_scan(const uint8_t *now, const uint8_t *ever)
+{
+    size_t o = (size_t)snprintf(s_scan, sizeof(s_scan), "I2C:");
+    for (uint8_t a = 0x08; a < 0x78 && o < sizeof(s_scan) - 4; a++) {
+        if (now[a]) {
+            o += (size_t)snprintf(s_scan + o, sizeof(s_scan) - o, " %02X", a);
+        }
+    }
+    bool first = true;
+    for (uint8_t a = 0x08; a < 0x78 && o < sizeof(s_scan) - 12; a++) {
+        if (ever[a] && !now[a]) {
+            o += (size_t)snprintf(s_scan + o, sizeof(s_scan) - o, "%s %02X", first ? "  gone:" : "", a);
+            first = false;
+        }
+    }
+}
+
 /* ---------------------------------------------------------------- monitor task */
 
 static void monitor_task(void *arg)
 {
     i2c_master_bus_handle_t bus = bsp_i2c_get_handle();
     uint8_t found[128] = {0};
+    uint8_t ever[128] = {0};
 
     /* --- I2C scan --- */
-    size_t o = 0;
-    o += snprintf(s_scan + o, sizeof(s_scan) - o, "I2C:");
+    scan_bus(bus, found);
     for (uint8_t a = 0x08; a < 0x78; a++) {
-        if (i2c_master_probe(bus, a, 20) == ESP_OK) {
-            found[a] = 1;
+        if (found[a]) {
+            ever[a] = 1;
             ESP_LOGI(TAG, "I2C device at 0x%02X", a);
-            if (o < sizeof(s_scan) - 4) {
-                o += snprintf(s_scan + o, sizeof(s_scan) - o, " %02X", a);
-            }
         }
     }
+    format_scan(found, ever);
 
-    /* --- Register dump of devices we do not recognise (0x3E, 0x57 on the 1.75C) --- */
+    /* --- Register dump of devices we do not recognise --- */
     for (uint8_t a = 0x08; a < 0x78; a++) {
-        if (!found[a]) {
-            continue;
+        if (found[a] && !is_known_addr(a)) {
+            dump_unknown(bus, a);
         }
-        if (a == 0x18 || a == 0x34 || a == 0x40 || a == 0x51 || a == 0x5A || a == 0x6A || a == 0x6B) {
-            continue;   /* ES8311, AXP2101, ES7210, RTC, touch, IMU */
-        }
-        i2c_master_dev_handle_t d = add_dev(bus, a);
-        if (!d) {
-            continue;
-        }
-        uint8_t b[16] = {0};
-        esp_err_t e = reg_read(d, 0x00, b, sizeof(b));
-        ESP_LOGI(TAG, "unknown device 0x%02X, read regs 0x00..0x0F: %s", a, esp_err_to_name(e));
-        ESP_LOG_BUFFER_HEX(TAG, b, sizeof(b));
     }
 
     i2c_master_dev_handle_t rtc = found[ADDR_RTC]     ? add_dev(bus, ADDR_RTC)     : NULL;
@@ -220,6 +257,24 @@ static void monitor_task(void *arg)
         reg_read(axp, 0x40, en, sizeof(en));
         ESP_LOGI(TAG, "AXP2101 status 0x00/0x01 = %02X %02X, INTEN 0x40..0x42 = %02X %02X %02X",
                  st[0], st[1], en[0], en[1], en[2]);
+
+        /* Enable the power-key IRQs so the PMIC IRQ line (if it reaches the ESP32)
+         * asserts on a PWR press: 0x41 bit0 = PWR_ON positive edge, bit1 = negative
+         * edge (Zephyr mfd_axp2101), bit3 = short press (docs.rs axp2101-embedded). */
+        uint8_t en1 = (uint8_t)(en[1] | 0x0B);
+        esp_err_t e1 = reg_write(axp, 0x41, &en1, 1);
+        ESP_LOGI(TAG, "AXP2101 INTEN1 0x41 -> %02X: %s", en1, esp_err_to_name(e1));
+
+        /* Clear any latched status (write 1 to clear) so the IRQ line starts released. */
+        uint8_t pre[3] = {0};
+        reg_read(axp, 0x48, pre, sizeof(pre));
+        ESP_LOGI(TAG, "AXP2101 INTSTS1..3 at start = %02X %02X %02X (clearing)", pre[0], pre[1], pre[2]);
+        for (uint8_t r = 0; r < 3; r++) {
+            uint8_t ff = 0xFF;
+            reg_write(axp, (uint8_t)(0x48 + r), &ff, 1);
+        }
+        reg_read(axp, 0x48, pre, sizeof(pre));
+        ESP_LOGI(TAG, "AXP2101 INTSTS1..3 after clear = %02X %02X %02X", pre[0], pre[1], pre[2]);
     }
 
     /* --- IMU init: accel only, +/-4g, 250 Hz normal mode --- */
@@ -280,8 +335,9 @@ static void monitor_task(void *arg)
     int boot_prev = gpio_get_level(PIN_BOOT);
     uint32_t boot_presses = 0;
 
-    uint8_t axp_irq_prev[3] = {0};
-    bool axp_irq_valid = false;
+    uint32_t pk_dn = 0, pk_up = 0, pk_short = 0, pk_b2 = 0;
+    char axp_last[32] = "AXP irq: none yet";
+    int64_t last_scan_ms = 0;
 
     float peak_dev_mg = 0;
     uint32_t spikes = 0;
@@ -329,16 +385,63 @@ static void monitor_task(void *arg)
             }
         }
 
-        /* AXP2101 interrupt status registers, about every 50 ms */
-        if (axp && (loop_n % 10) == 0) {
-            uint8_t irq[3] = {0};
-            if (reg_read(axp, 0x48, irq, sizeof(irq)) == ESP_OK) {
-                if (!axp_irq_valid || memcmp(irq, axp_irq_prev, sizeof(irq)) != 0) {
-                    ESP_LOGI(TAG, "AXP2101 INTSTS1..3 = %02X %02X %02X", irq[0], irq[1], irq[2]);
-                    memcpy(axp_irq_prev, irq, sizeof(irq));
-                    axp_irq_valid = true;
-                    snprintf(s_axp, sizeof(s_axp), "AXP irq %02X %02X %02X", irq[0], irq[1], irq[2]);
+        /* Levels of the free GPIOs that are low right now (raw, not debounced), ~50 ms */
+        if ((loop_n % 10) == 0) {
+            size_t lo = (size_t)snprintf(s_low, sizeof(s_low), "low now:");
+            bool any = false;
+            for (int i = 0; i < SCAN_COUNT; i++) {
+                if (gpio_get_level(SCAN_PINS[i]) == 0 && lo < sizeof(s_low) - 6) {
+                    lo += (size_t)snprintf(s_low + lo, sizeof(s_low) - lo, " %d", SCAN_PINS[i]);
+                    any = true;
                 }
+            }
+            if (!any) {
+                snprintf(s_low + lo, sizeof(s_low) - lo, " none");
+            }
+        }
+
+        /* AXP2101 interrupt status: read, count, log, then clear (write 1 to clear) */
+        if (axp && (loop_n % 10) == 5) {
+            uint8_t irq[3] = {0};
+            if (reg_read(axp, 0x48, irq, sizeof(irq)) == ESP_OK && (irq[0] | irq[1] | irq[2])) {
+                ESP_LOGI(TAG, "AXP2101 INTSTS1..3 = %02X %02X %02X at %" PRId64 " ms, GPIO3=%d",
+                         irq[0], irq[1], irq[2], now_ms, gpio_get_level(GPIO_NUM_3));
+                pk_up    += (irq[1] & 0x01) ? 1 : 0;   /* PWR_ON positive edge (release) */
+                pk_dn    += (irq[1] & 0x02) ? 1 : 0;   /* PWR_ON negative edge (press)   */
+                pk_b2    += (irq[1] & 0x04) ? 1 : 0;   /* unverified: probably long press */
+                pk_short += (irq[1] & 0x08) ? 1 : 0;   /* short press */
+                snprintf(axp_last, sizeof(axp_last), "last irq %02X %02X %02X", irq[0], irq[1], irq[2]);
+                for (uint8_t r = 0; r < 3; r++) {
+                    if (irq[r]) {
+                        reg_write(axp, (uint8_t)(0x48 + r), &irq[r], 1);
+                    }
+                }
+            }
+            snprintf(s_axp, sizeof(s_axp), "%s\nPWR dn=%" PRIu32 " up=%" PRIu32 " short=%" PRIu32 " b2=%" PRIu32,
+                     axp_last, pk_dn, pk_up, pk_short, pk_b2);
+        }
+
+        /* Re-scan the I2C bus every 5 s and report changes (0x3E/0x57 came and went) */
+        if (now_ms - last_scan_ms >= 5000) {
+            last_scan_ms = now_ms;
+            uint8_t cur[128] = {0};
+            scan_bus(bus, cur);
+            bool changed = false;
+            for (uint8_t a = 0x08; a < 0x78; a++) {
+                if (cur[a] != found[a]) {
+                    changed = true;
+                    ESP_LOGW(TAG, "I2C 0x%02X %s at %" PRId64 " ms", a, cur[a] ? "APPEARED" : "DISAPPEARED", now_ms);
+                    if (cur[a] && !ever[a] && !is_known_addr(a)) {
+                        dump_unknown(bus, a);
+                    }
+                }
+                if (cur[a]) {
+                    ever[a] = 1;
+                }
+            }
+            if (changed) {
+                memcpy(found, cur, sizeof(found));
+                format_scan(found, ever);
             }
         }
 
@@ -441,9 +544,9 @@ static void build_ui(void)
     s_lbl_scan  = make_label(&lv_font_montserrat_14,  -30, 300);
     s_lbl_imu   = make_label(&lv_font_montserrat_14,   20, 300);
     s_lbl_btn   = make_label(&lv_font_montserrat_14,   70, 300);
-    s_lbl_gpio  = make_label(&lv_font_montserrat_14,  100, 300);
-    s_lbl_touch = make_label(&lv_font_montserrat_14,  130, 300);
-    s_lbl_axp   = make_label(&lv_font_montserrat_14,  160, 300);
+    s_lbl_gpio  = make_label(&lv_font_montserrat_14,  104, 300);
+    s_lbl_touch = make_label(&lv_font_montserrat_14,  138, 300);
+    s_lbl_axp   = make_label(&lv_font_montserrat_14,  172, 300);
 }
 
 static void update_ui(void)
@@ -455,14 +558,16 @@ static void update_ui(void)
     lv_label_set_text(s_lbl_scan, s_scan);
     lv_label_set_text(s_lbl_imu, s_imu);
     lv_label_set_text(s_lbl_btn, s_btn);
-    lv_label_set_text(s_lbl_gpio, s_gpio);
+    char gpio_text[176];
+    snprintf(gpio_text, sizeof(gpio_text), "%s\n%s", s_gpio, s_low);
+    lv_label_set_text(s_lbl_gpio, gpio_text);
     lv_label_set_text(s_lbl_touch, s_touch);
     lv_label_set_text(s_lbl_axp, s_axp);
 }
 
 void app_main(void)
 {
-    ESP_LOGI(TAG, "Electric Pocket Watch bring-up v0.0.2 (built %s %s)", __DATE__, __TIME__);
+    ESP_LOGI(TAG, "Electric Pocket Watch bring-up v0.0.3 (built %s %s)", __DATE__, __TIME__);
 
     ESP_ERROR_CHECK(bsp_i2c_init());
 
