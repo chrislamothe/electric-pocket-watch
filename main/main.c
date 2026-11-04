@@ -1,6 +1,7 @@
 /*
- * Electric Pocket Watch - bring-up firmware v0.0.6
+ * Electric Pocket Watch - bring-up firmware v0.0.7
  *
+ * v0.0.7: IMU soft reset at init + CTRL8 handshake type (v0.0.6 left the IMU stuck).
  * v0.0.6: schematic-informed. QMI8658 INT1 (-> GPIO21) enabled, BOOT cycles
  *   250 Hz / wake-on-motion / off. PWR key = GPIO3 (high while pressed).
  * v0.0.5: QMI8658 INT2 output enabled (INT2 is not connected on the 1.75C).
@@ -240,6 +241,8 @@ static bool qmi_ctrl9(i2c_master_dev_handle_t imu, uint8_t cmd)
         vTaskDelay(pdMS_TO_TICKS(2));
     }
     if (!(st & 0x80)) {
+        v = 0x00;                                   /* never leave a command pending */
+        reg_write(imu, 0x0A, &v, 1);
         return false;
     }
     v = 0x00;                                       /* CTRL_CMD_ACK */
@@ -409,7 +412,18 @@ static void monitor_task(void *arg)
         /* CTRL1: bit6 address auto-increment, bit3 INT1 output enable (bit4 = INT2, which
          * the 1.75C schematic leaves unconnected). Bit positions from SensorLib
          * SensorQMI8658.hpp enableINT(). */
-        uint8_t v = 0x40 | 0x08;
+        /* Soft reset first: the IMU stays powered across ESP32 resets and v0.0.6 left it
+         * stuck mid-CTRL9 handshake (sampling frozen). RESET reg 0x60 <- 0xB0 (SensorLib
+         * reset(), RIOT constants); give it the documented ~15 ms. */
+        uint8_t v = 0xB0;
+        reg_write(imu, 0x60, &v, 1);
+        vTaskDelay(pdMS_TO_TICKS(30));
+        uint8_t rr = 0;
+        reg_read(imu, 0x4D, &rr, 1);
+        bootf("QMI8658 soft reset done, reg 0x4D = 0x%02X", rr);
+        v = 0x80;                       /* CTRL8: CTRL9 handshake via STATUSINT bit7 (SensorLib initImpl) */
+        reg_write(imu, 0x09, &v, 1);
+        v = 0x40 | 0x08;
         reg_write(imu, 0x02, &v, 1);
         imu_mode_name = imu_set_mode(imu, imu_mode);   /* 250 Hz, +/-4g, accel on; CTRL7 bit5=0 -> DRDY on */
         uint8_t rb[3] = {0};
@@ -642,7 +656,7 @@ static void monitor_task(void *arg)
                         *c = ' ';
                     }
                 }
-                ESP_LOGW(TAG, "==== summary at %" PRId64 " s (v0.0.6) ====\n%s"
+                ESP_LOGW(TAG, "==== summary at %" PRId64 " s (v0.0.7) ====\n%s"
                          "state: %s | %s | %s | %s | IMU %s INT1 %" PRIu32 "/s tot=%" PRIu32 " wom=%" PRIu32,
                          now_ms / 1000, s_boot_log, s_scan, s_gpio, s_low, now_axp,
                          imu_mode_name, int2_rate, s_int2_edges, wom_events);
@@ -733,7 +747,7 @@ static void update_ui(void)
 
 void app_main(void)
 {
-    ESP_LOGI(TAG, "Electric Pocket Watch bring-up v0.0.6 (built %s %s)", __DATE__, __TIME__);
+    ESP_LOGI(TAG, "Electric Pocket Watch bring-up v0.0.7 (built %s %s)", __DATE__, __TIME__);
 
     ESP_ERROR_CHECK(bsp_i2c_init());
 
