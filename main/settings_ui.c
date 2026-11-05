@@ -418,7 +418,10 @@ static void on_theme(lv_event_t *e)
 {
     (void)e;
     int t = (faces_theme() + 1) % WATCH_THEME_COUNT;
-    faces_set_theme_nolock(t);
+    faces_set_theme_nolock(t);              /* creates a new face object on top of the panel */
+    if (s_panel) {
+        lv_obj_move_foreground(s_panel);
+    }
     settings_set_int("theme", t);
     go(PAGE_MAIN);
 }

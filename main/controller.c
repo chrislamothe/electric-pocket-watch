@@ -27,6 +27,17 @@ static int s_imu_idle_level = 0;     /* INT1 level after arming; a change from i
 
 /* ---------------------------------------------------------------- screen */
 
+/* The brightness DCS command goes over the same QSPI link as the pixel data; send it while
+ * holding the LVGL lock so it never lands in the middle of a render/flush cycle. */
+static void set_brightness(int pct)
+{
+    bool locked = bsp_display_lock(1000) == ESP_OK;
+    bsp_display_brightness_set(pct);
+    if (locked) {
+        bsp_display_unlock();
+    }
+}
+
 static void touch_activity(void)
 {
     if (bsp_display_lock(500) == ESP_OK) {
@@ -46,7 +57,7 @@ static void screen_on(const char *why)
     }
     faces_set_active(true);                          /* draws the current time first */
     vTaskDelay(pdMS_TO_TICKS(60));                   /* let that frame reach the panel */
-    bsp_display_brightness_set(settings_get_int("bright", CONFIG_WATCH_BRIGHTNESS));
+    set_brightness(settings_get_int("bright", CONFIG_WATCH_BRIGHTNESS));
     s_awake_ms = (uint32_t)settings_get_int("awake_s", CONFIG_WATCH_AWAKE_MS / 1000) * 1000;
     touch_activity();
     s_screen_on = true;
@@ -56,7 +67,7 @@ static void screen_off(const char *why)
 {
     ESP_LOGI(TAG, "screen OFF (%s)", why);
     settings_ui_close();
-    bsp_display_brightness_set(0);
+    set_brightness(0);
     faces_set_active(false);
     /* Stop the LVGL worker (waits for any flush in progress) before light sleep, as the
      * esp_lvgl_adapter README prescribes for custom sleep flows. */

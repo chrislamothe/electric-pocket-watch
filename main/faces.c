@@ -144,6 +144,7 @@ void faces_set_active(bool active)
     }
     if (active) {
         tick(true);
+        lv_obj_invalidate(lv_screen_active());  /* full repaint on wake: no stale panel content */
         lv_timer_resume(s_timer);
     } else {
         lv_timer_pause(s_timer);

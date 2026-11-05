@@ -14,14 +14,15 @@ CONFIG_LV_FONT_MONTSERRAT_36=y
 CONFIG_LV_FONT_MONTSERRAT_48=y
 # LVGL settings from Waveshare's 02_lvgl_demo_v9 for this board and the esp_lvgl_adapter
 # README: C-library malloc (the 64 KB built-in pool is too small for the analog face),
-# FreeRTOS OS layer, style cache, two software draw units.
+# FreeRTOS OS layer, style cache. One software draw unit: parallel draw units were
+# ruled out after display corruption in v0.4.0.
 CONFIG_LV_USE_CLIB_MALLOC=y
 CONFIG_LV_USE_CLIB_STRING=y
 CONFIG_LV_USE_CLIB_SPRINTF=y
 CONFIG_LV_OS_FREERTOS=y
 CONFIG_LV_OBJ_STYLE_CACHE=y
 CONFIG_LV_DEF_REFR_PERIOD=15
-CONFIG_LV_DRAW_SW_DRAW_UNIT_CNT=2
+CONFIG_LV_DRAW_SW_DRAW_UNIT_CNT=1
 # Dark default theme for the settings keyboard and text field.
 CONFIG_LV_THEME_DEFAULT_DARK=y
 # LVGL warnings and asserts go to the serial console instead of hanging silently.
