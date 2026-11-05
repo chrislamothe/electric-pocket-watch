@@ -13,23 +13,36 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Build firmware
+      - name: Build firmware (stage 1 and stage 2)
         shell: bash
         run: |
+          set -e
           git config --global --add safe.directory "*"
           . "$IDF_PATH/export.sh"
-          idf.py set-target esp32s3
-          idf.py build
-          idf.py size
-          idf.py merge-bin -o electric-pocket-watch-merged.bin
-          F=$(find . -name electric-pocket-watch-merged.bin | head -1)
-          echo "merged binary: $F"
-          cp -f "$F" firmware-merged.bin
-          ls -l firmware-merged.bin
+          for STAGE in 1 2; do
+            B=build-stage$STAGE
+            DEFAULTS="sdkconfig.defaults"
+            [ "$STAGE" = 2 ] && DEFAULTS="sdkconfig.defaults;sdkconfig.stage2"
+            idf.py -B $B -D SDKCONFIG=$B/sdkconfig -D SDKCONFIG_DEFAULTS="$DEFAULTS" set-target esp32s3
+            idf.py -B $B -D SDKCONFIG=$B/sdkconfig -D SDKCONFIG_DEFAULTS="$DEFAULTS" build
+            echo "== stage $STAGE: key config values (a missing line means the option was ignored) =="
+            grep -E "^CONFIG_(WATCH_STAGE|LV_USE_CLIB_MALLOC|LV_OS_FREERTOS|LV_USE_LOG|LV_LOG_PRINTF|RTC_CLK_SRC_INT_8MD256|LV_FONT_MONTSERRAT_28|SPIRAM_MODE_OCT|ESP_CONSOLE_USB_SERIAL_JTAG)=" $B/sdkconfig || true
+            idf.py -B $B -D SDKCONFIG=$B/sdkconfig size
+            idf.py -B $B -D SDKCONFIG=$B/sdkconfig merge-bin -o merged-stage$STAGE.bin
+            F=$(find . -name merged-stage$STAGE.bin | head -1)
+            echo "merged binary: $F"
+            cp -f "$F" firmware-stage$STAGE.bin
+          done
+          ls -l firmware-stage*.bin
+          echo "== resolved component versions =="
+          grep -E "^  [a-z].*:$|^    version:" dependencies.lock | paste - - | head -40
 
       - name: Upload firmware
         uses: actions/upload-artifact@v4
         with:
           name: firmware
-          path: firmware-merged.bin
+          path: |
+            firmware-stage1.bin
+            firmware-stage2.bin
+            dependencies.lock
           if-no-files-found: error

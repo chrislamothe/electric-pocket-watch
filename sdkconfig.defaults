@@ -10,9 +10,21 @@ CONFIG_ESP_MAIN_TASK_STACK_SIZE=8192
 CONFIG_LV_FONT_MONTSERRAT_20=y
 CONFIG_LV_FONT_MONTSERRAT_28=y
 CONFIG_LV_FONT_MONTSERRAT_48=y
-# LVGL 9.6: allocate from the ESP heap (PSRAM-backed) instead of the 64 KB built-in pool,
-# and print LVGL warnings/asserts to the serial console.
+# LVGL settings from Waveshare's 02_lvgl_demo_v9 for this board and the esp_lvgl_adapter
+# README: C-library malloc (the 64 KB built-in pool is too small for the analog face),
+# FreeRTOS OS layer, style cache, two software draw units.
 CONFIG_LV_USE_CLIB_MALLOC=y
+CONFIG_LV_USE_CLIB_STRING=y
+CONFIG_LV_USE_CLIB_SPRINTF=y
+CONFIG_LV_OS_FREERTOS=y
+CONFIG_LV_OBJ_STYLE_CACHE=y
+CONFIG_LV_DEF_REFR_PERIOD=15
+CONFIG_LV_DRAW_SW_DRAW_UNIT_CNT=2
+# LVGL warnings and asserts go to the serial console instead of hanging silently.
 CONFIG_LV_USE_LOG=y
 CONFIG_LV_LOG_LEVEL_WARN=y
 CONFIG_LV_LOG_PRINTF=y
+# No 32 kHz crystal on the 1.75C (GPIO15 is I2C SDA). The divided internal 17.5 MHz
+# oscillator is more stable than the default 136 kHz RC for timekeeping in sleep
+# (ESP-IDF system_time docs), at about 5 uA more sleep current.
+CONFIG_RTC_CLK_SRC_INT_8MD256=y

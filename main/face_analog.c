@@ -81,7 +81,7 @@ static lv_obj_t *create(lv_obj_t *parent, int theme)
     S = lv_display_get_horizontal_resolution(NULL);
     C = S / 2;
     SUB_R = S / 10;
-    SUB_CY = C + (S * 21) / 100;
+    SUB_CY = C + (S * 19) / 100;
 
     lv_obj_t *root = lv_obj_create(parent);
     lv_obj_remove_style_all(root);
@@ -125,9 +125,9 @@ static lv_obj_t *create(lv_obj_t *parent, int theme)
     s_sec = line(root, s_sec_pts, 2, t->accent, true);
 
     /* hour and minute hands, then the centre cap */
-    radial(s_hour_pts, C, C, 0, -18, C * 0.45f);
+    radial(s_hour_pts, C, C, 0, -18, C * 0.52f);
     s_hour = line(root, s_hour_pts, 9, t->ink, true);
-    radial(s_min_pts, C, C, 0, -22, C * 0.66f);
+    radial(s_min_pts, C, C, 0, -22, C * 0.80f);
     s_min = line(root, s_min_pts, 6, t->ink, true);
     disc(root, C, C, 18, t->ink, 3, t->accent);
     return root;
@@ -141,9 +141,9 @@ static void update(const struct tm *now)
 
     radial(s_sec_pts, C, SUB_CY, sec * 6.0f, -6, SUB_R - 6);
     lv_line_set_points(s_sec, s_sec_pts, 2);
-    radial(s_min_pts, C, C, min * 6.0f, -22, C * 0.66f);
+    radial(s_min_pts, C, C, min * 6.0f, -22, C * 0.80f);
     lv_line_set_points(s_min, s_min_pts, 2);
-    radial(s_hour_pts, C, C, hour * 30.0f, -18, C * 0.45f);
+    radial(s_hour_pts, C, C, hour * 30.0f, -18, C * 0.52f);
     lv_line_set_points(s_hour, s_hour_pts, 2);
 }
 

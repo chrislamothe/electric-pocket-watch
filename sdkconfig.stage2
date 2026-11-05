@@ -1,0 +1,2 @@
+# Stage 2: full sleep/wake controller
+CONFIG_WATCH_STAGE=2

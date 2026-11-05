@@ -7,6 +7,7 @@
 #include "esp_log.h"
 #include "esp_sleep.h"
 #include "bsp/esp-bsp.h"
+#include "esp_lv_adapter.h"
 #include "axp.h"
 #include "buttons.h"
 #include "faces.h"
@@ -17,6 +18,8 @@ static const char *TAG = "ctl";
 typedef enum { WAKE_NONE = 0, WAKE_BOOT, WAKE_PWR, WAKE_IMU } wake_src_t;
 
 static bool s_screen_on = false;
+static bool s_lvgl_paused = false;
+static int s_imu_idle_level = 0;     /* INT1 level after arming; a change from it = motion */
 
 /* ---------------------------------------------------------------- screen */
 
@@ -33,6 +36,10 @@ static void screen_on(const char *why)
     int pct = axp_battery_percent();
     ESP_LOGI(TAG, "screen ON (%s), battery %d%%, VBUS %d", why, pct, axp_vbus_good());
     imu_off();
+    if (s_lvgl_paused) {
+        esp_lv_adapter_resume();                     /* restart the LVGL worker and its tick */
+        s_lvgl_paused = false;
+    }
     faces_set_active(true);                          /* draws the current time first */
     vTaskDelay(pdMS_TO_TICKS(60));                   /* let that frame reach the panel */
     bsp_display_brightness_set(CONFIG_WATCH_BRIGHTNESS);
@@ -45,6 +52,13 @@ static void screen_off(const char *why)
     ESP_LOGI(TAG, "screen OFF (%s)", why);
     bsp_display_brightness_set(0);
     faces_set_active(false);
+    /* Stop the LVGL worker (waits for any flush in progress) before light sleep, as the
+     * esp_lvgl_adapter README prescribes for custom sleep flows. */
+    if (esp_lv_adapter_pause(500) == ESP_OK) {
+        s_lvgl_paused = true;
+    } else {
+        ESP_LOGW(TAG, "LVGL pause timed out");
+    }
     s_screen_on = false;
 }
 
@@ -98,7 +112,7 @@ static wake_src_t wake_pins(void)
     if (buttons_pwr_down_raw()) {
         return WAKE_PWR;
     }
-    if (gpio_get_level(PIN_IMU_INT1)) {
+    if (gpio_get_level(PIN_IMU_INT1) != s_imu_idle_level) {
         return WAKE_IMU;
     }
     return WAKE_NONE;
@@ -111,7 +125,9 @@ static void wait_buttons_released(int max_ms)
     }
 }
 
-/* Settle, arm wake-on-motion, and make sure INT1 is low so the level wake does not fire at once. */
+/* Settle, arm wake-on-motion, then record INT1's idle level. The v0.0.8 log showed INT1 at both
+ * levels across WoM events, so it may toggle rather than pulse: the wake is armed on the level
+ * opposite to the recorded one, which catches either behaviour. */
 static void arm_for_sleep(void)
 {
     wait_buttons_released(3000);
@@ -119,9 +135,9 @@ static void arm_for_sleep(void)
         ESP_LOGI(TAG, "not still after 2 s; arming wake-on-motion anyway");
     }
     imu_arm_wom(CONFIG_WATCH_WOM_THRESHOLD_MG);
-    for (int i = 0; i < 20 && gpio_get_level(PIN_IMU_INT1); i++) {
-        vTaskDelay(pdMS_TO_TICKS(5));
-    }
+    vTaskDelay(pdMS_TO_TICKS(20));
+    s_imu_idle_level = gpio_get_level(PIN_IMU_INT1);
+    ESP_LOGI(TAG, "wake-on-motion armed, INT1 idle level %d", s_imu_idle_level);
 }
 
 /* Light sleep until one of BOOT (low), PWR (high) or IMU INT1 (high) fires. Per-pin wake levels
@@ -138,7 +154,7 @@ static wake_src_t wait_for_wake(void)
     if (light) {
         gpio_wakeup_enable(PIN_BOOT, GPIO_INTR_LOW_LEVEL);
         gpio_wakeup_enable(PIN_PWR, GPIO_INTR_HIGH_LEVEL);
-        gpio_wakeup_enable(PIN_IMU_INT1, GPIO_INTR_HIGH_LEVEL);
+        gpio_wakeup_enable(PIN_IMU_INT1, s_imu_idle_level ? GPIO_INTR_LOW_LEVEL : GPIO_INTR_HIGH_LEVEL);
         esp_sleep_enable_gpio_wakeup();
         esp_err_t r = esp_light_sleep_start();
         gpio_wakeup_disable(PIN_BOOT);
