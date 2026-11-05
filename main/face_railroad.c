@@ -1,5 +1,6 @@
 /*
- * Railroad face: cream enamel dial with a thin black edge ring, heavy high-contrast serif
+ * Railroad faces. Day: cream enamel dial with a thin black edge ring. Night: the same dial
+ * inverted (black to the edge, cream ink). Both: heavy high-contrast serif
  * numerals (Abril Fatface, OFL, digits only, main/fonts/), minute track with triangle markers at
  * 12/3/6/9, running-seconds sub-dial at 6 numbered 10..60, black spade hands.
  *
@@ -15,8 +16,14 @@
 LV_FONT_DECLARE(font_railroad_64);
 LV_FONT_DECLARE(font_railroad_20);
 
-#define COL_DIAL  0xF3EFE4
-#define COL_INK   0x161412
+typedef struct {
+    uint32_t dial, ink, pivot;
+    int edge_ring;              /* px; 0 = dial runs to the glass edge */
+} rr_palette_t;
+
+static const rr_palette_t DAY   = {0xF3EFE4, 0x161412, 0x8A7A5A, 5};
+static const rr_palette_t NIGHT = {0x000000, 0xF2EEDF, 0x8A7A5A, 0};   /* inverted, for AMOLED */
+static const rr_palette_t *s_pal = &DAY;
 #define SUB_R     64             /* sub-dial radius */
 #define SUB_DY    92             /* sub-dial centre below the dial centre */
 
@@ -73,7 +80,7 @@ static void draw_line(lv_layer_t *layer, float x0, float y0, float x1, float y1,
 {
     lv_draw_line_dsc_t d;
     lv_draw_line_dsc_init(&d);
-    d.color = lv_color_hex(COL_INK);
+    d.color = lv_color_hex(s_pal->ink);
     d.width = w;
     d.round_start = round;
     d.round_end = round;
@@ -88,7 +95,7 @@ static void draw_tri(lv_layer_t *layer, float ax, float ay, float bx, float by, 
 {
     lv_draw_triangle_dsc_t d;
     lv_draw_triangle_dsc_init(&d);
-    d.color = lv_color_hex(COL_INK);
+    d.color = lv_color_hex(s_pal->ink);
     d.opa = LV_OPA_COVER;
     d.p[0].x = (lv_value_precise_t)ax;
     d.p[0].y = (lv_value_precise_t)ay;
@@ -103,7 +110,7 @@ static void draw_dot(lv_layer_t *layer, float x, float y, float r)
 {
     lv_draw_rect_dsc_t d;
     lv_draw_rect_dsc_init(&d);
-    d.bg_color = lv_color_hex(COL_INK);
+    d.bg_color = lv_color_hex(s_pal->ink);
     d.bg_opa = LV_OPA_COVER;
     d.radius = LV_RADIUS_CIRCLE;
     lv_area_t a = {(int32_t)(x - r), (int32_t)(y - r), (int32_t)(x + r), (int32_t)(y + r)};
@@ -240,14 +247,14 @@ static void label_at(lv_obj_t *parent, const char *txt, const lv_font_t *font, f
     polar(cx, cy, deg, r, &x, &y);
     lv_obj_t *l = lv_label_create(parent);
     lv_obj_set_style_text_font(l, font, 0);
-    lv_obj_set_style_text_color(l, lv_color_hex(COL_INK), 0);
+    lv_obj_set_style_text_color(l, lv_color_hex(s_pal->ink), 0);
     lv_label_set_text(l, txt);
     lv_obj_align(l, LV_ALIGN_CENTER, (int)(x - C), (int)(y - C));
 }
 
-static lv_obj_t *create(lv_obj_t *parent, int theme)
+static lv_obj_t *create(lv_obj_t *parent, const rr_palette_t *pal)
 {
-    (void)theme;                                        /* fixed palette */
+    s_pal = pal;
     S = lv_display_get_horizontal_resolution(NULL);
     C = S / 2;
 
@@ -257,7 +264,7 @@ static lv_obj_t *create(lv_obj_t *parent, int theme)
     lv_obj_set_size(root, S, S);
     lv_obj_set_pos(root, 0, 0);
 
-    disc(root, C, C, S, COL_DIAL, LV_OPA_COVER, 5, COL_INK);   /* enamel dial, black edge ring */
+    disc(root, C, C, S, pal->dial, LV_OPA_COVER, pal->edge_ring, pal->ink);   /* dial + optional edge ring */
 
     lv_obj_t *dial = plain(root);
     lv_obj_set_size(dial, S, S);
@@ -270,7 +277,7 @@ static lv_obj_t *create(lv_obj_t *parent, int theme)
         }
     }
 
-    disc(root, C, C + SUB_DY, SUB_R * 2, COL_DIAL, LV_OPA_TRANSP, 2, COL_INK);
+    disc(root, C, C + SUB_DY, SUB_R * 2, pal->dial, LV_OPA_TRANSP, 2, pal->ink);
     static const char *const SUBNUM[6] = {"60", "10", "20", "30", "40", "50"};
     for (int i = 0; i < 6; i++) {
         label_at(root, SUBNUM[i], &font_railroad_20, C, C + SUB_DY, SUB_R - 26, i * 60.0f);
@@ -280,14 +287,14 @@ static lv_obj_t *create(lv_obj_t *parent, int theme)
     s_sec.obj = lv_line_create(root);
     lv_obj_remove_flag(s_sec.obj, LV_OBJ_FLAG_CLICKABLE);
     lv_obj_set_style_line_width(s_sec.obj, 2, 0);
-    lv_obj_set_style_line_color(s_sec.obj, lv_color_hex(COL_INK), 0);
+    lv_obj_set_style_line_color(s_sec.obj, lv_color_hex(s_pal->ink), 0);
     lv_obj_set_style_line_rounded(s_sec.obj, true, 0);
-    disc(root, C, C + SUB_DY, 8, COL_INK, LV_OPA_COVER, 0, 0);
+    disc(root, C, C + SUB_DY, 8, pal->ink, LV_OPA_COVER, 0, 0);
 
     spade_make(&s_hour, root, 14, C * 0.40f, 13, C * 0.56f, 4);
     spade_make(&s_min, root, 18, C * 0.62f, 11, C * 0.80f, 3);
-    disc(root, C, C, 20, COL_INK, LV_OPA_COVER, 0, 0);
-    disc(root, C, C, 6, 0x8A7A5A, LV_OPA_COVER, 0, 0);         /* pivot */
+    disc(root, C, C, 20, pal->ink, LV_OPA_COVER, 0, 0);
+    disc(root, C, C, 6, pal->pivot, LV_OPA_COVER, 0, 0);       /* pivot */
 
     sec_place(0);
     spade_place(&s_hour, 0);
@@ -305,4 +312,8 @@ static void update(const struct tm *now)
     spade_place(&s_hour, hour * 30.0f);
 }
 
-const watch_face_t face_railroad = {.name = "railroad", .create = create, .update = update};
+static lv_obj_t *create_day(lv_obj_t *parent, int theme)   { (void)theme; return create(parent, &DAY); }
+static lv_obj_t *create_night(lv_obj_t *parent, int theme) { (void)theme; return create(parent, &NIGHT); }
+
+const watch_face_t face_railroad       = {.name = "railroad",       .create = create_day,   .update = update};
+const watch_face_t face_railroad_night = {.name = "railroad-night", .create = create_night, .update = update};
