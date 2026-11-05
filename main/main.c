@@ -1,13 +1,17 @@
 /*
- * Electric Pocket Watch - milestone 1
+ * Electric Pocket Watch
  *
- * Board: Waveshare ESP32-S3-Touch-AMOLED-1.75C. Screen off until woken by BOOT (GPIO0),
- * PWR (GPIO3) or a double tap (QMI8658 wake-on-motion on GPIO21, confirmed in software).
- * Faces: classic analog and minimal digital; BOOT short press or a swipe changes face.
+ * Board: Waveshare ESP32-S3-Touch-AMOLED-1.75C.
+ * CONFIG_WATCH_STAGE 1: faces only, screen always on, BOOT short = next face, serial heartbeat.
+ * CONFIG_WATCH_STAGE 2: full controller (screen off until BOOT, PWR or a double tap).
  *
- * The bring-up/diagnostic firmware this replaces is tagged diag-v0.0.8 in git.
+ * The bring-up/diagnostic firmware is commit 986ce41 (v0.0.8).
  */
 
+#include <inttypes.h>
+#include "freertos/FreeRTOS.h"
+#include "freertos/task.h"
+#include "esp_heap_caps.h"
 #include "esp_log.h"
 #include "bsp/esp-bsp.h"
 #include "axp.h"
@@ -19,22 +23,48 @@
 
 static const char *TAG = "pocketwatch";
 
+static void stage1_loop(void)
+{
+    bsp_display_brightness_set(CONFIG_WATCH_BRIGHTNESS);
+    ESP_LOGI(TAG, "stage 1: screen on at %d%%", CONFIG_WATCH_BRIGHTNESS);
+    uint32_t n = 0;
+    while (1) {
+        if (buttons_poll() == BTN_BOOT_SHORT) {
+            ESP_LOGI(TAG, "BOOT short: next face");
+            faces_next();
+        }
+        if ((++n % 200) == 0) {                 /* every ~2 s */
+            struct tm t;
+            watch_time_now(&t, NULL);
+            ESP_LOGI(TAG, "alive %02d:%02d:%02d  heap internal %u  psram %u  battery %d%%  VBUS %d",
+                     t.tm_hour, t.tm_min, t.tm_sec,
+                     (unsigned)heap_caps_get_free_size(MALLOC_CAP_INTERNAL),
+                     (unsigned)heap_caps_get_free_size(MALLOC_CAP_SPIRAM),
+                     axp_battery_percent(), axp_vbus_good());
+        }
+        vTaskDelay(pdMS_TO_TICKS(10));
+    }
+}
+
 void app_main(void)
 {
-    ESP_LOGI(TAG, "Electric Pocket Watch milestone 1 (built %s %s)", __DATE__, __TIME__);
+    ESP_LOGI(TAG, "Electric Pocket Watch stage %d (built %s %s)", CONFIG_WATCH_STAGE, __DATE__, __TIME__);
 
     ESP_ERROR_CHECK(bsp_i2c_init());
+    ESP_LOGI(TAG, "step: display start");
     lv_display_t *disp = bsp_display_start();
     if (!disp) {
         ESP_LOGE(TAG, "bsp_display_start failed");
         return;
     }
-    bsp_display_brightness_set(0);              /* stay dark until the first face is drawn */
+    bsp_display_brightness_set(0);              /* dark until the first face is drawn */
 
     i2c_master_bus_handle_t bus = bsp_i2c_get_handle();
+    ESP_LOGI(TAG, "step: PMIC");
     if (!axp_init(bus)) {
-        ESP_LOGE(TAG, "PMIC not available: battery and USB state unknown");
+        ESP_LOGE(TAG, "PMIC not available");
     }
+    ESP_LOGI(TAG, "step: IMU");
     if (!imu_init(bus)) {
         ESP_LOGE(TAG, "IMU not available: double-tap wake disabled");
     }
@@ -42,10 +72,20 @@ void app_main(void)
     watch_time_init();
     buttons_init();
 
+    ESP_LOGI(TAG, "step: faces");
     if (bsp_display_lock(1000) == ESP_OK) {
         faces_init();
         bsp_display_unlock();
+    } else {
+        ESP_LOGE(TAG, "LVGL lock timeout");
     }
+    ESP_LOGI(TAG, "step: faces built, heap internal %u psram %u",
+             (unsigned)heap_caps_get_free_size(MALLOC_CAP_INTERNAL),
+             (unsigned)heap_caps_get_free_size(MALLOC_CAP_SPIRAM));
 
+#if CONFIG_WATCH_STAGE == 1
+    stage1_loop();
+#else
     controller_run();
+#endif
 }

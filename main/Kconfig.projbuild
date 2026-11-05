@@ -1,5 +1,10 @@
 menu "Electric Pocket Watch"
 
+    config WATCH_STAGE
+        int "Bring-up stage (1 = faces only, always on; 2 = full sleep/wake controller)"
+        range 1 2
+        default 1
+
     config WATCH_AWAKE_MS
         int "Screen-on time after the last touch or button press (ms)"
         default 10000
