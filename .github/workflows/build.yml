@@ -52,6 +52,8 @@ jobs:
     # One-time setup: repository Settings > Pages > Source: GitHub Actions.
     if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main'
     needs: build
+    # Until Pages is enabled the deploy step 404s; don't fail the run (and email) for that.
+    continue-on-error: true
     runs-on: ubuntu-latest
     permissions:
       pages: write
