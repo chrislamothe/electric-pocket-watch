@@ -19,17 +19,47 @@ static lv_obj_t *s_root = NULL;
 static lv_timer_t *s_timer = NULL;
 static int s_last_sec = -1;
 
-/* ---------------------------------------------------------------- battery ring
- * Thin ring at the very edge of the glass, above every face: sweep = battery %, clockwise from
- * 12 (100 % = full circle). At 10 % and below it turns red. Read every 30 s and on every wake. */
-#define BATT_RING_W      5
+/* ---------------------------------------------------------------- battery indicator
+ * Twelve segments at the edge of the glass, one per hour: 12-1 is the first, 11-12 the last, so a
+ * full battery lights all twelve. Each segment is 1/12 of the charge (rounded up). When only the
+ * 12-1 and 1-2 segments are left (<= 2/12, about 17 %), the lit segments turn red.
+ * Read every 30 s and on every wake; drawn by one object with a custom draw callback. */
+#define BATT_SEGMENTS    12
+#define BATT_RED_AT      2
+#define BATT_W           6
+#define BATT_GAP_DEG     2
 #define COL_BATT_OK      0x6FB35A
 #define COL_BATT_LOW     0xD0342C
-#define COL_BATT_TRACK   0x202020
 #define BATT_PERIOD_US   (30LL * 1000 * 1000)
 
 static lv_obj_t *s_batt;
+static int s_batt_lit = -1;
 static int64_t s_batt_next_us;
+
+static void batt_draw_cb(lv_event_t *e)
+{
+    if (s_batt_lit <= 0) {
+        return;
+    }
+    lv_layer_t *layer = lv_event_get_layer(e);
+    int32_t w = lv_display_get_horizontal_resolution(NULL);
+    lv_draw_arc_dsc_t d;
+    lv_draw_arc_dsc_init(&d);
+    d.color = lv_color_hex(s_batt_lit <= BATT_RED_AT ? COL_BATT_LOW : COL_BATT_OK);
+    d.width = BATT_W;
+    d.center.x = w / 2;
+    d.center.y = w / 2;
+    d.radius = (uint16_t)(w / 2 - 2);
+    d.rounded = 0;
+    for (int i = 0; i < s_batt_lit; i++) {
+        /* LVGL angles: 0 = 3 o'clock, clockwise; 12 o'clock = 270 */
+        int start = 270 + i * 30 + BATT_GAP_DEG;
+        int end = 270 + (i + 1) * 30 - BATT_GAP_DEG;
+        d.start_angle = (lv_value_precise_t)(start % 360);
+        d.end_angle = (lv_value_precise_t)(end % 360);
+        lv_draw_arc(layer, &d);
+    }
+}
 
 static void batt_refresh(bool force)
 {
@@ -41,33 +71,28 @@ static void batt_refresh(bool force)
         return;
     }
     s_batt_next_us = now + BATT_PERIOD_US;
-    bool enabled = settings_get_int("batt_ring", 1) != 0;
     int pct = axp_battery_percent();
-    if (!enabled || pct < 0) {
-        lv_obj_add_flag(s_batt, LV_OBJ_FLAG_HIDDEN);
-        return;
+    int lit = 0;
+    if (settings_get_int("batt_ring", 1) && pct >= 0) {
+        lit = (pct * BATT_SEGMENTS + 99) / 100;         /* any charge in a segment lights it */
+        if (lit > BATT_SEGMENTS) {
+            lit = BATT_SEGMENTS;
+        }
     }
-    lv_obj_remove_flag(s_batt, LV_OBJ_FLAG_HIDDEN);
-    lv_arc_set_value(s_batt, pct);
-    lv_obj_set_style_arc_color(s_batt, lv_color_hex(pct <= 10 ? COL_BATT_LOW : COL_BATT_OK), LV_PART_INDICATOR);
+    if (lit != s_batt_lit) {
+        s_batt_lit = lit;
+        lv_obj_invalidate(s_batt);
+    }
 }
 
 static void batt_create(void)
 {
-    s_batt = lv_arc_create(lv_screen_active());
-    lv_obj_remove_flag(s_batt, LV_OBJ_FLAG_CLICKABLE);      /* touches go to the face below */
-    lv_obj_remove_style(s_batt, NULL, LV_PART_KNOB);
+    s_batt = lv_obj_create(lv_screen_active());
+    lv_obj_remove_style_all(s_batt);
+    lv_obj_remove_flag(s_batt, LV_OBJ_FLAG_CLICKABLE | LV_OBJ_FLAG_SCROLLABLE);   /* touches go to the face */
     lv_obj_set_size(s_batt, lv_display_get_horizontal_resolution(NULL), lv_display_get_vertical_resolution(NULL));
-    lv_obj_center(s_batt);
-    lv_obj_set_style_pad_all(s_batt, 0, LV_PART_MAIN);
-    lv_arc_set_rotation(s_batt, 270);                        /* start at 12 o'clock */
-    lv_arc_set_bg_angles(s_batt, 0, 360);
-    lv_arc_set_range(s_batt, 0, 100);
-    lv_obj_set_style_arc_width(s_batt, BATT_RING_W, LV_PART_MAIN);
-    lv_obj_set_style_arc_width(s_batt, BATT_RING_W, LV_PART_INDICATOR);
-    lv_obj_set_style_arc_rounded(s_batt, false, LV_PART_MAIN);
-    lv_obj_set_style_arc_rounded(s_batt, false, LV_PART_INDICATOR);
-    lv_obj_set_style_arc_color(s_batt, lv_color_hex(COL_BATT_TRACK), LV_PART_MAIN);
+    lv_obj_set_pos(s_batt, 0, 0);
+    lv_obj_add_event_cb(s_batt, batt_draw_cb, LV_EVENT_DRAW_MAIN, NULL);
     batt_refresh(true);
 }
 

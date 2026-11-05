@@ -190,8 +190,7 @@ static lv_obj_t *create(lv_obj_t *parent, int theme, const analog_style_t *style
     lv_obj_set_size(root, S, S);
     lv_obj_set_pos(root, 0, 0);
 
-    disc(root, C, C, S, t->bezel, 0, 0);
-    disc(root, C, C, S - 28, t->dial, 3, t->bezel_edge);
+    disc(root, C, C, S, t->dial, 0, 0);                 /* dial to the glass edge, no case ring */
 
     /* minute track: moved inward when the 5..60 numbers sit outside it */
     float r_out = style->minute_numbers ? C - 48 : C - 22;

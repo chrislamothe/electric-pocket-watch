@@ -21,7 +21,7 @@ typedef struct {
     int edge_ring;              /* px; 0 = dial runs to the glass edge */
 } rr_palette_t;
 
-static const rr_palette_t DAY   = {0xF3EFE4, 0x161412, 0x8A7A5A, 5};
+static const rr_palette_t DAY   = {0xF3EFE4, 0x161412, 0x8A7A5A, 0};   /* no edge ring */
 static const rr_palette_t NIGHT = {0x000000, 0xF2EEDF, 0x8A7A5A, 0};   /* inverted, for AMOLED */
 static const rr_palette_t *s_pal = &DAY;
 #define SUB_R     64             /* sub-dial radius */

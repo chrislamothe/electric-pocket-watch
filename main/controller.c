@@ -4,6 +4,7 @@
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 #include "driver/gpio.h"
+#include "esp_heap_caps.h"
 #include "esp_log.h"
 #include "esp_sleep.h"
 #include "bsp/esp-bsp.h"
@@ -49,7 +50,9 @@ static void touch_activity(void)
 static void screen_on(const char *why)
 {
     int pct = axp_battery_percent();
-    ESP_LOGI(TAG, "screen ON (%s), battery %d%%, VBUS %d", why, pct, axp_vbus_good());
+    ESP_LOGI(TAG, "screen ON (%s), battery %d%%, VBUS %d, internal DMA free %u (largest %u)", why, pct,
+             axp_vbus_good(), (unsigned)heap_caps_get_free_size(MALLOC_CAP_INTERNAL | MALLOC_CAP_DMA),
+             (unsigned)heap_caps_get_largest_free_block(MALLOC_CAP_INTERNAL | MALLOC_CAP_DMA));
     imu_off();
     if (s_lvgl_paused) {
         esp_lv_adapter_resume();                     /* restart the LVGL worker and its tick */
