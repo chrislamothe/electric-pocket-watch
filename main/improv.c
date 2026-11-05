@@ -124,7 +124,7 @@ static void handle_rpc(const uint8_t *d, uint8_t len)
         send_byte(TYPE_STATE, STATE_PROVISIONING);
         faces_show_status("Joining Wi-Fi...", 0);
         net_result_t r = net_provision(ssid, pass);
-        if (r == NET_OK || r == NET_NTP_FAILED) {       /* credentials work; NTP is a bonus */
+        if (r == NET_OK || r == NET_OK_OPEN || r == NET_NTP_FAILED) {       /* credentials work; NTP is a bonus */
             send_byte(TYPE_STATE, STATE_PROVISIONED);
             send_result(CMD_WIFI, NULL, 0);             /* no redirect URL */
             faces_show_status(r == NET_OK ? "Wi-Fi saved, time synced" : "Wi-Fi saved", 4000);

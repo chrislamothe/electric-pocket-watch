@@ -8,6 +8,7 @@
  */
 typedef enum {
     NET_OK = 0,
+    NET_OK_OPEN,            /* synced through an open (passwordless) network */
     NET_NO_CREDENTIALS,
     NET_CONNECT_FAILED,
     NET_NTP_FAILED,
@@ -23,7 +24,9 @@ typedef struct {
 void net_init(void);
 const char *net_result_text(net_result_t r);
 
-/* Connect with the saved credentials, sync the clock over SNTP, radio off. Blocks up to ~25 s. */
+/* Sync the clock over SNTP: saved network first; if that fails or none is saved and setting
+ * "open_wifi" (default on) allows it, the three strongest open networks. Radio off afterwards.
+ * Blocks up to ~25 s, longer when open networks are tried. */
 net_result_t net_sync_time(void);
 
 /* Connect with new credentials; on success save them, sync the clock, radio off. */
