@@ -1,6 +1,8 @@
 #include "faces.h"
 
 #include "esp_log.h"
+#include "esp_timer.h"
+#include "axp.h"
 #include "bsp/esp-bsp.h"
 #include "settings.h"
 #include "settings_ui.h"
@@ -17,6 +19,58 @@ static lv_obj_t *s_root = NULL;
 static lv_timer_t *s_timer = NULL;
 static int s_last_sec = -1;
 
+/* ---------------------------------------------------------------- battery ring
+ * Thin ring at the very edge of the glass, above every face: sweep = battery %, clockwise from
+ * 12 (100 % = full circle). At 10 % and below it turns red. Read every 30 s and on every wake. */
+#define BATT_RING_W      5
+#define COL_BATT_OK      0x6FB35A
+#define COL_BATT_LOW     0xD0342C
+#define COL_BATT_TRACK   0x202020
+#define BATT_PERIOD_US   (30LL * 1000 * 1000)
+
+static lv_obj_t *s_batt;
+static int64_t s_batt_next_us;
+
+static void batt_refresh(bool force)
+{
+    if (!s_batt) {
+        return;
+    }
+    int64_t now = esp_timer_get_time();
+    if (!force && now < s_batt_next_us) {
+        return;
+    }
+    s_batt_next_us = now + BATT_PERIOD_US;
+    bool enabled = settings_get_int("batt_ring", 1) != 0;
+    int pct = axp_battery_percent();
+    if (!enabled || pct < 0) {
+        lv_obj_add_flag(s_batt, LV_OBJ_FLAG_HIDDEN);
+        return;
+    }
+    lv_obj_remove_flag(s_batt, LV_OBJ_FLAG_HIDDEN);
+    lv_arc_set_value(s_batt, pct);
+    lv_obj_set_style_arc_color(s_batt, lv_color_hex(pct <= 10 ? COL_BATT_LOW : COL_BATT_OK), LV_PART_INDICATOR);
+}
+
+static void batt_create(void)
+{
+    s_batt = lv_arc_create(lv_screen_active());
+    lv_obj_remove_flag(s_batt, LV_OBJ_FLAG_CLICKABLE);      /* touches go to the face below */
+    lv_obj_remove_style(s_batt, NULL, LV_PART_KNOB);
+    lv_obj_set_size(s_batt, lv_display_get_horizontal_resolution(NULL), lv_display_get_vertical_resolution(NULL));
+    lv_obj_center(s_batt);
+    lv_obj_set_style_pad_all(s_batt, 0, LV_PART_MAIN);
+    lv_arc_set_rotation(s_batt, 270);                        /* start at 12 o'clock */
+    lv_arc_set_bg_angles(s_batt, 0, 360);
+    lv_arc_set_range(s_batt, 0, 100);
+    lv_obj_set_style_arc_width(s_batt, BATT_RING_W, LV_PART_MAIN);
+    lv_obj_set_style_arc_width(s_batt, BATT_RING_W, LV_PART_INDICATOR);
+    lv_obj_set_style_arc_rounded(s_batt, false, LV_PART_MAIN);
+    lv_obj_set_style_arc_rounded(s_batt, false, LV_PART_INDICATOR);
+    lv_obj_set_style_arc_color(s_batt, lv_color_hex(COL_BATT_TRACK), LV_PART_MAIN);
+    batt_refresh(true);
+}
+
 static void tick(bool force)
 {
     struct tm now;
@@ -28,6 +82,7 @@ static void tick(bool force)
     if (s_root) {
         s_faces[s_index]->update(&now);
     }
+    batt_refresh(force);
 }
 
 static void timer_cb(lv_timer_t *t)
@@ -50,6 +105,9 @@ static void build_current(void)
     lv_obj_add_event_cb(s_root, gesture_cb, LV_EVENT_GESTURE, NULL);
     ESP_LOGI(TAG, "face '%s', theme %d", s_faces[s_index]->name, s_theme);
     tick(true);
+    if (s_batt) {
+        lv_obj_move_foreground(s_batt);
+    }
     if (s_status) {
         lv_obj_move_foreground(s_status);
     }
@@ -104,6 +162,7 @@ void faces_init(void)
     if (s_index < 0 || s_index >= FACE_COUNT) {
         s_index = 0;
     }
+    batt_create();
     build_current();
     s_timer = lv_timer_create(timer_cb, 250, NULL);
 }
@@ -191,4 +250,9 @@ void faces_show_status(const char *text, int hide_after_ms)
         lv_timer_set_repeat_count(s_status_timer, 1);
     }
     bsp_display_unlock();
+}
+
+void faces_battery_ring_changed_nolock(void)
+{
+    batt_refresh(true);
 }

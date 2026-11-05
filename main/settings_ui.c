@@ -497,6 +497,14 @@ static void on_brightness(lv_event_t *e)
     }
 }
 
+static void on_batt_ring(lv_event_t *e)
+{
+    (void)e;
+    settings_set_int("batt_ring", !settings_get_int("batt_ring", 1));
+    faces_battery_ring_changed_nolock();
+    go(PAGE_DISPLAY);
+}
+
 static void on_awake(lv_event_t *e)
 {
     (void)e;
@@ -619,6 +627,8 @@ static void build_display(void)
     char txt[32];
     snprintf(txt, sizeof(txt), "Screen on: %d s", settings_get_int("awake_s", CONFIG_WATCH_AWAKE_MS / 1000));
     item(s_list, txt, on_awake, NULL);
+    snprintf(txt, sizeof(txt), "Battery ring: %s", settings_get_int("batt_ring", 1) ? "On" : "Off");
+    item(s_list, txt, on_batt_ring, NULL);
     item(s_list, "Back", on_to_main, NULL);
 }
 
