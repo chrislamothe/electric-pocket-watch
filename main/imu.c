@@ -20,6 +20,7 @@ static const char *TAG = "imu";
 #define REG_CAL1_H      0x0C
 #define REG_STATUSINT   0x2D
 #define REG_RESET       0x60
+#define REG_RST_RESULT  0x4D
 #define REG_ACCEL_X_L   0x35
 
 #define CTRL1_BASE      0x40    /* bit6: register address auto-increment */
@@ -78,8 +79,33 @@ static bool read_dev_mg(float *dev_mg)
     return true;
 }
 
+/* Soft reset and wait for RST_RESULT (0x4D) = 0x80, as SensorLib reset() does. The chip NACKs
+ * for ~2 ms while resetting. A reset is the only reliable way out of wake-on-motion: the
+ * v0.1 stage-2 log showed accel data frozen (same 19 mg reading every time) after a plain
+ * CTRL2/CTRL7 switch from WoM to normal mode. SensorLib also resets before configuring WoM. */
+static bool imu_reset(void)
+{
+    i2c_reg_write(s_imu, REG_RESET, 0xB0);
+    vTaskDelay(pdMS_TO_TICKS(3));
+    uint8_t v = 0;
+    bool ok = false;
+    for (int i = 0; i < 50 && !ok; i++) {
+        ok = i2c_reg_read(s_imu, REG_RST_RESULT, &v, 1) == ESP_OK && v != 0xFF && (v & 0x80);
+        if (!ok) {
+            vTaskDelay(pdMS_TO_TICKS(2));
+        }
+    }
+    if (!ok) {
+        ESP_LOGW(TAG, "QMI8658 reset timeout (0x4D = 0x%02X)", v);
+    }
+    i2c_reg_write(s_imu, REG_CTRL8, 0x80);                  /* CTRL9 handshake via STATUSINT bit7 */
+    i2c_reg_write(s_imu, REG_CTRL1, CTRL1_BASE);
+    return ok;
+}
+
 static void start_normal_mode(void)
 {
+    imu_reset();
     i2c_reg_write(s_imu, REG_CTRL7, 0x00);
     i2c_reg_write(s_imu, REG_CTRL1, CTRL1_BASE);            /* INT1 output off */
     i2c_reg_write(s_imu, REG_CTRL2, CTRL2_250HZ_4G);
@@ -98,10 +124,7 @@ bool imu_init(i2c_master_bus_handle_t bus)
         ESP_LOGE(TAG, "QMI8658 WHO_AM_I = 0x%02X (expect 0x05)", who);
         return false;
     }
-    i2c_reg_write(s_imu, REG_RESET, 0xB0);                  /* it keeps power across ESP32 resets */
-    vTaskDelay(pdMS_TO_TICKS(30));
-    i2c_reg_write(s_imu, REG_CTRL8, 0x80);                  /* CTRL9 handshake via STATUSINT bit7 */
-    i2c_reg_write(s_imu, REG_CTRL1, CTRL1_BASE);
+    imu_reset();                                            /* it keeps power across ESP32 resets */
     imu_off();
 
     gpio_config_t cfg = {
@@ -127,6 +150,7 @@ bool imu_arm_wom(uint8_t threshold_mg)
     if (!s_imu) {
         return false;
     }
+    imu_reset();
     i2c_reg_write(s_imu, REG_CTRL7, 0x00);
     i2c_reg_write(s_imu, REG_CTRL1, CTRL1_BASE | CTRL1_INT1_EN);
     i2c_reg_write(s_imu, REG_CTRL2, CTRL2_LP_128HZ);

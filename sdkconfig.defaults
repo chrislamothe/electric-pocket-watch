@@ -7,8 +7,10 @@ CONFIG_SPIRAM_SPEED_80M=y
 CONFIG_ESP_CONSOLE_USB_SERIAL_JTAG=y
 CONFIG_FREERTOS_HZ=1000
 CONFIG_ESP_MAIN_TASK_STACK_SIZE=8192
+CONFIG_LV_FONT_MONTSERRAT_16=y
 CONFIG_LV_FONT_MONTSERRAT_28=y
 CONFIG_LV_FONT_MONTSERRAT_36=y
+CONFIG_LV_FONT_MONTSERRAT_48=y
 # LVGL settings from Waveshare's 02_lvgl_demo_v9 for this board and the esp_lvgl_adapter
 # README: C-library malloc (the 64 KB built-in pool is too small for the analog face),
 # FreeRTOS OS layer, style cache, two software draw units.

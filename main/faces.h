@@ -32,3 +32,4 @@ void faces_set_active(bool active);
 
 extern const watch_face_t face_roman;
 extern const watch_face_t face_arabic;
+extern const watch_face_t face_black;

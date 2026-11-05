@@ -25,7 +25,7 @@ static int s_imu_idle_level = 0;     /* INT1 level after arming; a change from i
 
 static void touch_activity(void)
 {
-    if (bsp_display_lock(200) == ESP_OK) {
+    if (bsp_display_lock(500) == ESP_OK) {
         lv_display_trigger_activity(NULL);
         bsp_display_unlock();
     }
@@ -89,7 +89,7 @@ static void run_screen_on(void)
         }
         if ((++n % 20) == 0) {                       /* every ~200 ms */
             uint32_t idle = 0;
-            if (bsp_display_lock(100) == ESP_OK) {
+            if (bsp_display_lock(500) == ESP_OK) {
                 idle = lv_display_get_inactive_time(NULL);
                 bsp_display_unlock();
             }
