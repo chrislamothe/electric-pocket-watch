@@ -4,7 +4,7 @@
 
 /*
  * On-watch settings: Wi-Fi network list + password keyboard, "set time now", open-Wi-Fi
- * fallback switch, dial theme. Opened by a BOOT double press or a swipe up on the face.
+ * fallback switch, display settings, system. Opened by a BOOT double press or a swipe up on the face.
  *
  * Functions without _nolock take the LVGL lock; _nolock variants are for LVGL callbacks.
  */

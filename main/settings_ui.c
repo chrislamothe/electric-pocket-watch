@@ -79,7 +79,6 @@ static char s_sel_ssid[33];
 static char s_note[64];             /* one-shot message for the next page build */
 static bool s_reset_armed;          /* factory reset needs a second tap */
 
-static const char *const THEME_NAMES[WATCH_THEME_COUNT] = {"Brass", "Silver", "Dark"};
 static const int AWAKE_CHOICES[] = {5, 10, 20, 30};
 #define AWAKE_COUNT ((int)(sizeof(AWAKE_CHOICES) / sizeof(AWAKE_CHOICES[0])))
 
@@ -411,7 +410,7 @@ static void on_factory_reset(lv_event_t *e)
             lv_label_set_text(l, "Tap again to erase");
         }
         lv_obj_set_style_bg_color(btn, lv_color_hex(0x5A2A1E), 0);
-        set_status("Erases Wi-Fi, brightness, theme and face, then restarts");
+        set_status("Erases Wi-Fi, display settings and face, then restarts");
         return;
     }
     bsp_display_brightness_set(0);
@@ -442,18 +441,6 @@ static void on_forget(lv_event_t *e)
     net_forget();
     snprintf(s_note, sizeof(s_note), "Saved network removed");
     go(PAGE_WIFI);
-}
-
-static void on_theme(lv_event_t *e)
-{
-    (void)e;
-    int t = (faces_theme() + 1) % WATCH_THEME_COUNT;
-    faces_set_theme_nolock(t);              /* creates a new face object on top of the panel */
-    if (s_panel) {
-        lv_obj_move_foreground(s_panel);
-    }
-    settings_set_int("theme", t);
-    go(PAGE_MAIN);
 }
 
 static void on_ap(lv_event_t *e)
@@ -528,8 +515,6 @@ static void build_main(void)
     s_wifi_sub = item2(s_list, "Wi-Fi", sum, c, on_to_wifi);
     snprintf(txt, sizeof(txt), "Brightness %d%%", settings_get_int("bright", CONFIG_WATCH_BRIGHTNESS));
     item2(s_list, "Display", txt, COL_DIM, on_to_display);
-    snprintf(txt, sizeof(txt), "Theme: %s", THEME_NAMES[faces_theme()]);
-    item(s_list, txt, on_theme, NULL);
     snprintf(txt, sizeof(txt), "v%s", WATCH_VERSION);
     item2(s_list, "System", txt, COL_DIM, on_to_system);
     item(s_list, "Close", on_close, NULL);

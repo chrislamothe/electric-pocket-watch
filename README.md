@@ -26,7 +26,7 @@ clock.
 - **Time sync over Wi-Fi**: the watch syncs once at power-on and whenever you ask. It uses your saved
   network, or an open network if allowed. Wi-Fi is off the rest of the time.
 - **Settings on the watch**: Wi-Fi setup with a network list and on-screen keyboard, live Wi-Fi
-  status, brightness, screen-on time, battery indicator, dial theme, restart and factory reset.
+  status, brightness, screen-on time, battery indicator, restart and factory reset.
 - **Recovers from hangs**: a watchdog reboots the watch if the firmware ever locks up.
 
 ## Hardware
@@ -89,7 +89,6 @@ useful for checking the display or measuring screen power.
   - **Forget network**
 - **Display**: brightness slider (5–100 %), screen-on time (5 / 10 / 20 / 30 s), battery indicator
   on/off.
-- **Theme**: Brass / Silver / Dark, for the Roman and Arabic dials.
 - **System**: version, battery, **Restart**, **Factory reset** (tap twice).
 
 Wi-Fi can also be changed from the install page: **Connect watch → Change Wi-Fi**.

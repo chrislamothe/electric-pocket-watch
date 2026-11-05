@@ -15,18 +15,14 @@
 
 typedef struct {
     const char *name;
-    lv_obj_t *(*create)(lv_obj_t *parent, int theme);   /* returns the face's root container */
+    lv_obj_t *(*create)(lv_obj_t *parent, int unused);  /* returns the face's root container */
     void (*update)(const struct tm *now);               /* called once per second */
 } watch_face_t;
 
-#define WATCH_THEME_COUNT 3     /* 0 brass, 1 silver, 2 dark */
 
 void faces_init(void);
 void faces_next(void);
 void faces_prev(void);
-void faces_set_theme(int theme);
-void faces_set_theme_nolock(int theme);   /* caller holds the LVGL lock */
-int  faces_theme(void);
 
 /* Pause/resume redraws while the screen is off. Resume draws the current time immediately. */
 void faces_set_active(bool active);

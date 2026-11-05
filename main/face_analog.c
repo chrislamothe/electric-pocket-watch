@@ -1,7 +1,7 @@
 /*
  * Analog pocket-watch faces, all drawn by one routine:
- *   face_roman  - roman numerals, running-seconds sub-dial at 6 o'clock (theme colours)
- *   face_arabic - arabic numerals, red centre seconds hand (theme colours)
+ *   face_roman  - roman numerals, running-seconds sub-dial at 6 o'clock (cream dial)
+ *   face_arabic - arabic numerals, red centre seconds hand (cream dial)
  *   face_black  - black dial, silver case, large cream arabic numerals, outer 5..60 minute
  *                 numbers, thin silver hands (fixed palette)
  * Geometry is derived from the display size (466 px on the 1.75C).
@@ -16,11 +16,8 @@ typedef struct {
     uint32_t bezel, bezel_edge, dial, sub, ink, accent, hand;
 } analog_palette_t;
 
-static const analog_palette_t THEMES[WATCH_THEME_COUNT] = {
-    /* brass  */ {0xB5883A, 0x7A5A22, 0xF4EBD3, 0xEADFC2, 0x2A2016, 0x9C2A1E, 0x2A2016},
-    /* silver */ {0xC9CDD2, 0x8A9097, 0xF5F6F7, 0xE6E8EA, 0x1E2328, 0x274B8F, 0x1E2328},
-    /* dark   */ {0x2A2A2E, 0x6B5A3A, 0x0B0B0D, 0x151518, 0xE8DFC8, 0xD9A441, 0xE8DFC8},
-};
+/* Roman and Arabic: cream dial, dark brown ink, brass accents */
+static const analog_palette_t CLASSIC = {0xB5883A, 0x7A5A22, 0xF4EBD3, 0xEADFC2, 0x2A2016, 0x9C2A1E, 0x2A2016};
 
 /* black face: chrome case, black dial, cream numerals, grey minute numbers, silver hands */
 static const analog_palette_t BLACK = {0xCDD1D6, 0x7E848B, 0x050505, 0x111111, 0xF2EEDF, 0x9A9A9A, 0xD9DCE0};
@@ -31,7 +28,7 @@ typedef struct {
     int num_inset;                      /* numeral centre distance in from the display edge */
     bool sub_seconds;                   /* sub-dial at 6; otherwise centre seconds hand */
     bool minute_numbers;                /* 5..60 around the outside of the minute track */
-    const analog_palette_t *palette;    /* NULL: use the selected theme */
+    const analog_palette_t *palette;    /* NULL: CLASSIC */
     uint32_t sec_color;                 /* centre seconds hand; 0 = palette hand colour */
     int hour_w, min_w, sec_w;
     float hour_len, min_len, sec_len;   /* fractions of the radius */
@@ -177,7 +174,8 @@ static void set_hands(float sec, float min, float hour)
 
 static lv_obj_t *create(lv_obj_t *parent, int theme, const analog_style_t *style)
 {
-    const analog_palette_t *t = style->palette ? style->palette : &THEMES[theme];
+    (void)theme;
+    const analog_palette_t *t = style->palette ? style->palette : &CLASSIC;
     s_style = style;
     S = lv_display_get_horizontal_resolution(NULL);
     C = S / 2;

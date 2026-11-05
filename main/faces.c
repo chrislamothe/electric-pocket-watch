@@ -14,7 +14,6 @@ static const watch_face_t *const s_faces[] = {&face_roman, &face_arabic, &face_b
 #define FACE_COUNT ((int)(sizeof(s_faces) / sizeof(s_faces[0])))
 
 static int s_index = 0;
-static int s_theme = 0;
 static lv_obj_t *s_root = NULL;
 static lv_timer_t *s_timer = NULL;
 static int s_last_sec = -1;
@@ -126,9 +125,9 @@ static void build_current(void)
         lv_obj_delete(s_root);
         s_root = NULL;
     }
-    s_root = s_faces[s_index]->create(lv_screen_active(), s_theme);
+    s_root = s_faces[s_index]->create(lv_screen_active(), 0);
     lv_obj_add_event_cb(s_root, gesture_cb, LV_EVENT_GESTURE, NULL);
-    ESP_LOGI(TAG, "face '%s', theme %d", s_faces[s_index]->name, s_theme);
+    ESP_LOGI(TAG, "face '%s'", s_faces[s_index]->name);
     tick(true);
     if (s_batt) {
         lv_obj_move_foreground(s_batt);
@@ -179,10 +178,6 @@ void faces_init(void)
     lv_obj_t *scr = lv_screen_active();
     lv_obj_set_style_bg_color(scr, lv_color_black(), 0);
     lv_obj_set_style_bg_opa(scr, LV_OPA_COVER, 0);
-    s_theme = settings_get_int("theme", 0);
-    if (s_theme < 0 || s_theme >= WATCH_THEME_COUNT) {
-        s_theme = 0;
-    }
     s_index = settings_get_int("face", 0);
     if (s_index < 0 || s_index >= FACE_COUNT) {
         s_index = 0;
@@ -203,23 +198,6 @@ static void step_locked(int step)
 
 void faces_next(void) { step_locked(1); }
 void faces_prev(void) { step_locked(-1); }
-
-void faces_set_theme_nolock(int theme)
-{
-    s_theme = ((theme % WATCH_THEME_COUNT) + WATCH_THEME_COUNT) % WATCH_THEME_COUNT;
-    build_current();
-}
-
-void faces_set_theme(int theme)
-{
-    if (bsp_display_lock(500) != ESP_OK) {
-        return;
-    }
-    faces_set_theme_nolock(theme);
-    bsp_display_unlock();
-}
-
-int faces_theme(void) { return s_theme; }
 
 void faces_set_active(bool active)
 {
