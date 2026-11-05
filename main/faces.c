@@ -6,7 +6,7 @@
 
 static const char *TAG = "faces";
 
-static const watch_face_t *const s_faces[] = {&face_analog, &face_digital};
+static const watch_face_t *const s_faces[] = {&face_roman, &face_arabic};
 #define FACE_COUNT ((int)(sizeof(s_faces) / sizeof(s_faces[0])))
 
 static int s_index = 0;

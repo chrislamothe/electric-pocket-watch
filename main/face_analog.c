@@ -1,5 +1,7 @@
 /*
- * Classic analog face: roman numerals, minute track, running-seconds sub-dial at 6 o'clock.
+ * Analog pocket-watch faces, sharing one drawing routine:
+ *   face_roman  - roman numerals, running-seconds sub-dial at 6 o'clock
+ *   face_arabic - arabic numerals, red centre seconds hand
  * Geometry is derived from the display size (466 px on the 1.75C).
  */
 #include <math.h>
@@ -15,11 +17,28 @@ static const analog_theme_t THEMES[WATCH_THEME_COUNT] = {
     /* dark   */ {0x2A2A2E, 0x6B5A3A, 0x0B0B0D, 0x151518, 0xE8DFC8, 0xD9A441},
 };
 
+#define SECONDS_RED  0xC62828       /* centre seconds hand, same on every theme */
+
+typedef struct {
+    const char *const *numerals;       /* 12 strings, starting at 12 o'clock */
+    const lv_font_t *font;
+    bool sub_seconds;                  /* true: sub-dial at 6; false: red centre seconds hand */
+} analog_style_t;
+
+static const char *const ROMAN[12]  = {"XII", "I", "II", "III", "IIII", "V",
+                                       "VI", "VII", "VIII", "IX", "X", "XI"};
+static const char *const ARABIC[12] = {"12", "1", "2", "3", "4", "5",
+                                       "6", "7", "8", "9", "10", "11"};
+
+static const analog_style_t STYLE_ROMAN  = {ROMAN, &lv_font_montserrat_28, true};
+static const analog_style_t STYLE_ARABIC = {ARABIC, &lv_font_montserrat_36, false};
+
 #define MINUTE_TICKS 60
 #define SUB_TICKS    12
 
 static int S, C;                       /* display size and centre */
 static int SUB_CY, SUB_R;              /* sub-dial centre y and radius */
+static const analog_style_t *s_style;
 
 static lv_obj_t *s_hour, *s_min, *s_sec;
 static lv_point_precise_t s_hour_pts[2], s_min_pts[2], s_sec_pts[2];
@@ -75,9 +94,10 @@ static void radial(lv_point_precise_t *pts, int cx, int cy, float deg, float r0,
     pts[1].y = (lv_value_precise_t)(cy - r1 * c);
 }
 
-static lv_obj_t *create(lv_obj_t *parent, int theme)
+static lv_obj_t *create(lv_obj_t *parent, int theme, const analog_style_t *style)
 {
     const analog_theme_t *t = &THEMES[theme];
+    s_style = style;
     S = lv_display_get_horizontal_resolution(NULL);
     C = S / 2;
     SUB_R = S / 10;
@@ -102,36 +122,48 @@ static lv_obj_t *create(lv_obj_t *parent, int theme)
         line(root, s_tick_pts[n], hour ? 5 : 2, t->ink, false);
     }
 
-    /* roman numerals; IIII is the traditional dial form */
-    static const char *const NUM[12] = {"XII", "I", "II", "III", "IIII", "V",
-                                        "VI", "VII", "VIII", "IX", "X", "XI"};
+    /* numerals (roman uses IIII, the traditional dial form) */
     float r_num = C - 78;
     for (int i = 0; i < 12; i++) {
         float a = i * 30.0f * (float)M_PI / 180.0f;
         lv_obj_t *l = lv_label_create(root);
-        lv_obj_set_style_text_font(l, &lv_font_montserrat_28, 0);
+        lv_obj_set_style_text_font(l, style->font, 0);
         lv_obj_set_style_text_color(l, lv_color_hex(t->ink), 0);
-        lv_label_set_text(l, NUM[i]);
+        lv_label_set_text(l, style->numerals[i]);
         lv_obj_align(l, LV_ALIGN_CENTER, (int)(r_num * sinf(a)), (int)(-r_num * cosf(a)));
     }
 
-    /* running-seconds sub-dial at 6 o'clock */
-    disc(root, C, SUB_CY, SUB_R * 2, t->sub, 2, t->bezel_edge);
-    for (int i = 0; i < SUB_TICKS; i++, n++) {
-        radial(s_tick_pts[n], C, SUB_CY, i * 30.0f, SUB_R - 9, SUB_R - 3);
-        line(root, s_tick_pts[n], 2, t->ink, false);
+    if (style->sub_seconds) {
+        /* running-seconds sub-dial at 6 o'clock, drawn under the main hands */
+        disc(root, C, SUB_CY, SUB_R * 2, t->sub, 2, t->bezel_edge);
+        for (int i = 0; i < SUB_TICKS; i++, n++) {
+            radial(s_tick_pts[n], C, SUB_CY, i * 30.0f, SUB_R - 9, SUB_R - 3);
+            line(root, s_tick_pts[n], 2, t->ink, false);
+        }
+        radial(s_sec_pts, C, SUB_CY, 0, -6, SUB_R - 6);
+        s_sec = line(root, s_sec_pts, 2, t->accent, true);
     }
-    radial(s_sec_pts, C, SUB_CY, 0, 0, SUB_R - 6);
-    s_sec = line(root, s_sec_pts, 2, t->accent, true);
 
-    /* hour and minute hands, then the centre cap */
+    /* hour and minute hands */
     radial(s_hour_pts, C, C, 0, -18, C * 0.52f);
     s_hour = line(root, s_hour_pts, 9, t->ink, true);
     radial(s_min_pts, C, C, 0, -22, C * 0.80f);
     s_min = line(root, s_min_pts, 6, t->ink, true);
-    disc(root, C, C, 18, t->ink, 3, t->accent);
+
+    if (style->sub_seconds) {
+        disc(root, C, C, 18, t->ink, 3, t->accent);
+    } else {
+        /* red centre seconds hand with a counterweight tail, over the other hands */
+        disc(root, C, C, 18, t->ink, 0, 0);
+        radial(s_sec_pts, C, C, 0, -C * 0.20f, C * 0.86f);
+        s_sec = line(root, s_sec_pts, 3, SECONDS_RED, true);
+        disc(root, C, C, 10, SECONDS_RED, 0, 0);
+    }
     return root;
 }
+
+static lv_obj_t *create_roman(lv_obj_t *parent, int theme)  { return create(parent, theme, &STYLE_ROMAN); }
+static lv_obj_t *create_arabic(lv_obj_t *parent, int theme) { return create(parent, theme, &STYLE_ARABIC); }
 
 static void update(const struct tm *now)
 {
@@ -139,7 +171,11 @@ static void update(const struct tm *now)
     float min = now->tm_min + sec / 60.0f;
     float hour = (now->tm_hour % 12) + min / 60.0f;
 
-    radial(s_sec_pts, C, SUB_CY, sec * 6.0f, -6, SUB_R - 6);
+    if (s_style->sub_seconds) {
+        radial(s_sec_pts, C, SUB_CY, sec * 6.0f, -6, SUB_R - 6);
+    } else {
+        radial(s_sec_pts, C, C, sec * 6.0f, -C * 0.20f, C * 0.86f);
+    }
     lv_line_set_points(s_sec, s_sec_pts, 2);
     radial(s_min_pts, C, C, min * 6.0f, -22, C * 0.80f);
     lv_line_set_points(s_min, s_min_pts, 2);
@@ -147,8 +183,14 @@ static void update(const struct tm *now)
     lv_line_set_points(s_hour, s_hour_pts, 2);
 }
 
-const watch_face_t face_analog = {
-    .name = "analog",
-    .create = create,
+const watch_face_t face_roman = {
+    .name = "roman",
+    .create = create_roman,
+    .update = update,
+};
+
+const watch_face_t face_arabic = {
+    .name = "arabic",
+    .create = create_arabic,
     .update = update,
 };

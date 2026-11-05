@@ -30,5 +30,5 @@ int  faces_theme(void);
 /* Pause/resume redraws while the screen is off. Resume draws the current time immediately. */
 void faces_set_active(bool active);
 
-extern const watch_face_t face_analog;
-extern const watch_face_t face_digital;
+extern const watch_face_t face_roman;
+extern const watch_face_t face_arabic;
