@@ -2,6 +2,7 @@
 
 #include "esp_log.h"
 #include "bsp/esp-bsp.h"
+#include "settings.h"
 #include "watch_time.h"
 
 static const char *TAG = "faces";
@@ -35,6 +36,8 @@ static void timer_cb(lv_timer_t *t)
 }
 
 static void gesture_cb(lv_event_t *e);
+static lv_obj_t *s_status = NULL;
+static lv_timer_t *s_status_timer = NULL;
 
 static void build_current(void)
 {
@@ -46,13 +49,21 @@ static void build_current(void)
     lv_obj_add_event_cb(s_root, gesture_cb, LV_EVENT_GESTURE, NULL);
     ESP_LOGI(TAG, "face '%s', theme %d", s_faces[s_index]->name, s_theme);
     tick(true);
+    if (s_status) {
+        lv_obj_move_foreground(s_status);
+    }
+}
+
+static void select_face(int step)
+{
+    s_index = (s_index + step + FACE_COUNT) % FACE_COUNT;
+    build_current();
+    settings_set_int("face", s_index);
 }
 
 static void async_step(void *arg)
 {
-    int step = (int)(intptr_t)arg;
-    s_index = (s_index + step + FACE_COUNT) % FACE_COUNT;
-    build_current();
+    select_face((int)(intptr_t)arg);
 }
 
 static void gesture_cb(lv_event_t *e)
@@ -74,6 +85,10 @@ void faces_init(void)
     lv_obj_t *scr = lv_screen_active();
     lv_obj_set_style_bg_color(scr, lv_color_black(), 0);
     lv_obj_set_style_bg_opa(scr, LV_OPA_COVER, 0);
+    s_index = settings_get_int("face", 0);
+    if (s_index < 0 || s_index >= FACE_COUNT) {
+        s_index = 0;
+    }
     build_current();
     s_timer = lv_timer_create(timer_cb, 250, NULL);
 }
@@ -83,8 +98,7 @@ static void step_locked(int step)
     if (bsp_display_lock(500) != ESP_OK) {
         return;
     }
-    s_index = (s_index + step + FACE_COUNT) % FACE_COUNT;
-    build_current();
+    select_face(step);
     bsp_display_unlock();
 }
 
@@ -113,6 +127,47 @@ void faces_set_active(bool active)
         lv_timer_resume(s_timer);
     } else {
         lv_timer_pause(s_timer);
+    }
+    bsp_display_unlock();
+}
+
+/* ---------------------------------------------------------------- status message */
+
+static void status_hide_cb(lv_timer_t *t)
+{
+    (void)t;
+    if (s_status) {
+        lv_obj_add_flag(s_status, LV_OBJ_FLAG_HIDDEN);
+    }
+    s_status_timer = NULL;                      /* one-shot timer deletes itself */
+}
+
+void faces_show_status(const char *text, int hide_after_ms)
+{
+    if (!s_timer || bsp_display_lock(1000) != ESP_OK) {
+        return;                                 /* not initialised yet, or LVGL busy */
+    }
+    if (!s_status) {
+        s_status = lv_label_create(lv_screen_active());
+        lv_obj_set_style_text_font(s_status, &lv_font_montserrat_28, 0);
+        lv_obj_set_style_text_color(s_status, lv_color_white(), 0);
+        lv_obj_set_style_bg_color(s_status, lv_color_black(), 0);
+        lv_obj_set_style_bg_opa(s_status, LV_OPA_80, 0);
+        lv_obj_set_style_radius(s_status, 14, 0);
+        lv_obj_set_style_pad_hor(s_status, 18, 0);
+        lv_obj_set_style_pad_ver(s_status, 10, 0);
+    }
+    lv_label_set_text(s_status, text);
+    lv_obj_align(s_status, LV_ALIGN_CENTER, 0, 120);
+    lv_obj_remove_flag(s_status, LV_OBJ_FLAG_HIDDEN);
+    lv_obj_move_foreground(s_status);
+    if (s_status_timer) {
+        lv_timer_delete(s_status_timer);
+        s_status_timer = NULL;
+    }
+    if (hide_after_ms > 0) {
+        s_status_timer = lv_timer_create(status_hide_cb, hide_after_ms, NULL);
+        lv_timer_set_repeat_count(s_status_timer, 1);
     }
     bsp_display_unlock();
 }

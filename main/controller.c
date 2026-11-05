@@ -12,6 +12,7 @@
 #include "buttons.h"
 #include "faces.h"
 #include "imu.h"
+#include "net.h"
 
 static const char *TAG = "ctl";
 
@@ -75,9 +76,16 @@ static void run_screen_on(void)
             touch_activity();
             break;
         case BTN_BOOT_LONG:
-            ESP_LOGI(TAG, "BOOT long: reserved for WiFi time sync");
+        {
+            ESP_LOGI(TAG, "BOOT long: Wi-Fi time sync");
+            faces_show_status("Syncing time...", 0);
+            net_result_t r = net_sync_time();
+            ESP_LOGI(TAG, "time sync: %s", net_result_text(r));
+            faces_show_status(net_result_text(r), 3000);
+            buttons_sync_and_consume();
             touch_activity();
             break;
+        }
         case BTN_PWR_SHORT:
             screen_off("PWR");
             return;
@@ -89,7 +97,7 @@ static void run_screen_on(void)
         }
         if ((++n % 20) == 0) {                       /* every ~200 ms */
             uint32_t idle = 0;
-            if (bsp_display_lock(500) == ESP_OK) {
+            if (bsp_display_lock(1000) == ESP_OK) {
                 idle = lv_display_get_inactive_time(NULL);
                 bsp_display_unlock();
             }

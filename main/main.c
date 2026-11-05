@@ -19,6 +19,10 @@
 #include "controller.h"
 #include "faces.h"
 #include "imu.h"
+#include "improv.h"
+#include "net.h"
+#include "settings.h"
+#include "version.h"
 #include "watch_time.h"
 
 static const char *TAG = "pocketwatch";
@@ -48,7 +52,11 @@ static void stage1_loop(void)
 
 void app_main(void)
 {
-    ESP_LOGI(TAG, "Electric Pocket Watch stage %d (built %s %s)", CONFIG_WATCH_STAGE, __DATE__, __TIME__);
+    improv_start();                             /* USB serial driver first: console goes through it */
+    ESP_LOGI(TAG, "%s %s stage %d (built %s %s)", WATCH_NAME, WATCH_VERSION, CONFIG_WATCH_STAGE,
+             __DATE__, __TIME__);
+    settings_init();
+    net_init();
 
     ESP_ERROR_CHECK(bsp_i2c_init());
     ESP_LOGI(TAG, "step: display start");

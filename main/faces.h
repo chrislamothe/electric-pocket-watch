@@ -30,6 +30,9 @@ int  faces_theme(void);
 /* Pause/resume redraws while the screen is off. Resume draws the current time immediately. */
 void faces_set_active(bool active);
 
+/* Message box over the face; hide_after_ms <= 0 keeps it until the next call. */
+void faces_show_status(const char *text, int hide_after_ms);
+
 extern const watch_face_t face_roman;
 extern const watch_face_t face_arabic;
 extern const watch_face_t face_black;
