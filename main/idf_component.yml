@@ -1,6 +1,7 @@
 dependencies:
   idf: ">=5.5.0"
-  # Board support: local copy in components/watch_bsp (psram_dma_direct fix).
+  waveshare/esp32_s3_touch_amoled_1_75c: "3.0.0"
+  # Same LVGL version as Waveshare's examples/esp-idf/02_lvgl_demo_v9 for this board.
   lvgl/lvgl:
     version: "9.5.0"
     public: true

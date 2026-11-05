@@ -144,8 +144,6 @@ main/
   improv.c          Improv Wi-Fi over USB serial (used by the install page)
   imu.c axp.c buttons.c settings.c watch_time.c i2c_dev.c
   fonts/            Abril Fatface digits for the railroad dials (generated with lv_font_conv)
-components/watch_bsp/
-  local copy of Waveshare's BSP 3.0.0 with psram_dma_direct enabled (see below)
 site/               ESP Web Tools install page and manifest
 tools/wifi.py       command-line Improv client, for debugging
 ```
@@ -164,10 +162,9 @@ tools/wifi.py       command-line Improv client, for debugging
   data freezes after leaving wake-on-motion without a reset.
 - Light sleep uses per-pin GPIO wake, which allows the mixed polarity of the wake pins (BOOT low,
   PWR high, IMU on change).
-- **Display fix**: the upstream BSP's QSPI panel I/O left `psram_dma_direct` off. Every pixel
-  transfer from the PSRAM draw buffers then needed a ~46 KB internal-RAM bounce buffer. When that
-  allocation failed (internal RAM is shared with Wi-Fi), the strip was dropped and the panel kept
-  stale pixels. `components/watch_bsp` turns the flag on.
+- **Display memory**: Waveshare's BSP streams the PSRAM draw buffers to the panel through
+  ~46 KB internal-RAM bounce buffers. Wi-Fi/lwIP buffers are moved to PSRAM and 128 KB of internal
+  RAM is reserved, so those allocations keep succeeding.
 
 ## Status and known limits
 
@@ -178,8 +175,7 @@ tools/wifi.py       command-line Improv client, for debugging
 ## Credits and third-party licenses
 
 - [LVGL](https://lvgl.io) 9.5: MIT
-- [Waveshare ESP32 components](https://github.com/waveshareteam/waveshare-esp32-components) BSP:
-  Apache-2.0 (`components/watch_bsp/LICENSE`)
+- [Waveshare BSP](https://components.espressif.com/components/waveshare/esp32_s3_touch_amoled_1_75c): Apache-2.0
 - [Abril Fatface](https://fonts.google.com/specimen/Abril+Fatface): SIL Open Font License
   (`main/fonts/OFL-AbrilFatface.txt`)
 - [ESP Web Tools](https://github.com/esphome/esp-web-tools) and the
