@@ -23,6 +23,7 @@
 #include "net.h"
 #include "settings.h"
 #include "settings_ui.h"
+#include "splash.h"
 #include "version.h"
 #include "watch_time.h"
 
@@ -78,7 +79,7 @@ void app_main(void)
         ESP_LOGE(TAG, "bsp_display_start failed");
         return;
     }
-    bsp_display_brightness_set(0);              /* dark until the first face is drawn */
+    splash_show();                              /* name, version, reset reason */
 
     i2c_master_bus_handle_t bus = bsp_i2c_get_handle();
     ESP_LOGI(TAG, "step: PMIC");
@@ -102,6 +103,7 @@ void app_main(void)
     } else {
         ESP_LOGE(TAG, "LVGL lock timeout");
     }
+    splash_hide();
     ESP_LOGI(TAG, "step: faces built, heap internal %u psram %u",
              (unsigned)heap_caps_get_free_size(MALLOC_CAP_INTERNAL),
              (unsigned)heap_caps_get_free_size(MALLOC_CAP_SPIRAM));
