@@ -55,3 +55,10 @@ void settings_set_str(const char *key, const char *value)
         nvs_commit(s_nvs);
     }
 }
+
+void settings_erase(const char *key)
+{
+    if (s_ok && nvs_erase_key(s_nvs, key) == ESP_OK) {
+        nvs_commit(s_nvs);
+    }
+}

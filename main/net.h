@@ -21,7 +21,26 @@ typedef struct {
     bool secured;
 } net_ap_t;
 
+typedef enum {
+    NET_RADIO_OFF = 0,
+    NET_RADIO_SCANNING,
+    NET_RADIO_CONNECTING,
+    NET_RADIO_CONNECTED,
+} net_radio_t;
+
+typedef struct {
+    net_radio_t radio;
+    char radio_ssid[33];        /* network being joined / joined */
+    bool have_result;           /* any sync/join attempted since power-on */
+    net_result_t last_result;
+    char last_ssid[33];         /* network the last attempt ended on ("" if none) */
+    long long last_attempt;     /* epoch seconds */
+    long long last_sync;        /* epoch seconds of the last successful sync, 0 = never */
+} net_status_t;
+
 void net_init(void);
+void net_get_status(net_status_t *out);
+void net_forget(void);       /* erase the saved network */
 bool net_busy(void);     /* radio in use (sync, scan, provisioning): do not light-sleep */
 const char *net_result_text(net_result_t r);
 

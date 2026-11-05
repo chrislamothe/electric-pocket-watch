@@ -10,3 +10,4 @@ int  settings_get_int(const char *key, int def);
 void settings_set_int(const char *key, int value);
 bool settings_get_str(const char *key, char *buf, size_t len);
 void settings_set_str(const char *key, const char *value);
+void settings_erase(const char *key);

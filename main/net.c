@@ -28,6 +28,31 @@ static EventGroupHandle_t s_ev;
 static bool s_inited;
 static volatile bool s_want_connect;
 static int s_retries;
+static net_status_t s_st;
+
+static void record(net_result_t r, const char *ssid)
+{
+    struct timeval tv;
+    gettimeofday(&tv, NULL);
+    s_st.have_result = true;
+    s_st.last_result = r;
+    strlcpy(s_st.last_ssid, ssid ? ssid : "", sizeof(s_st.last_ssid));
+    s_st.last_attempt = tv.tv_sec;
+    if (r == NET_OK || r == NET_OK_OPEN) {
+        s_st.last_sync = tv.tv_sec;
+    }
+}
+
+void net_get_status(net_status_t *out)
+{
+    *out = s_st;
+}
+
+void net_forget(void)
+{
+    settings_erase("ssid");
+    settings_erase("pass");
+}
 
 const char *net_result_text(net_result_t r)
 {
@@ -55,6 +80,7 @@ static void on_event(void *arg, esp_event_base_t base, int32_t id, void *data)
             xEventGroupSetBits(s_ev, BIT_FAILED);
         }
     } else if (base == IP_EVENT && id == IP_EVENT_STA_GOT_IP) {
+        s_st.radio = NET_RADIO_CONNECTED;
         xEventGroupSetBits(s_ev, BIT_GOT_IP);
     }
 }
@@ -101,6 +127,8 @@ static bool wifi_join(const char *ssid, const char *pass, int timeout_ms)
     s_retries = 0;
     s_want_connect = true;
     ESP_LOGI(TAG, "connecting to '%s'", ssid);
+    s_st.radio = NET_RADIO_CONNECTING;
+    strlcpy(s_st.radio_ssid, ssid, sizeof(s_st.radio_ssid));
     if (esp_wifi_start() != ESP_OK) {
         s_want_connect = false;
         return false;
@@ -115,6 +143,8 @@ static bool wifi_join(const char *ssid, const char *pass, int timeout_ms)
 static void radio_off(void)
 {
     s_want_connect = false;
+    s_st.radio = NET_RADIO_OFF;
+    s_st.radio_ssid[0] = '\0';
     if (s_inited) {
         esp_wifi_disconnect();
         esp_wifi_stop();
@@ -179,6 +209,9 @@ net_result_t net_sync_time(void)
             r = o;
         }
     }
+    if (r != NET_OK_OPEN) {
+        record(r, have_saved ? ssid : "");
+    }
     xSemaphoreGive(s_lock);
     return r;
 }
@@ -195,6 +228,7 @@ net_result_t net_provision(const char *ssid, const char *pass)
         r = sync_ntp() ? NET_OK : NET_NTP_FAILED;
     }
     radio_off();
+    record(r, ssid);
     xSemaphoreGive(s_lock);
     return r;
 }
@@ -207,6 +241,7 @@ static int scan_locked(net_ap_t *out, int max)
         return 0;
     }
     s_want_connect = false;
+    s_st.radio = NET_RADIO_SCANNING;
     esp_wifi_start();
     wifi_scan_config_t sc = {0};
     if (esp_wifi_scan_start(&sc, true) == ESP_OK) {
@@ -226,6 +261,7 @@ static int scan_locked(net_ap_t *out, int max)
         free(recs);
     }
     esp_wifi_stop();
+    s_st.radio = NET_RADIO_OFF;
     /* strongest first */
     for (int i = 1; i < count; i++) {
         net_ap_t t = out[i];
@@ -267,6 +303,7 @@ static net_result_t sync_via_open_locked(void)
             bool ok = sync_ntp();
             radio_off();
             if (ok) {
+                record(NET_OK_OPEN, aps[i].ssid);
                 return NET_OK_OPEN;
             }
         } else {

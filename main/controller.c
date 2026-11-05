@@ -13,6 +13,7 @@
 #include "faces.h"
 #include "imu.h"
 #include "net.h"
+#include "settings.h"
 #include "settings_ui.h"
 
 static const char *TAG = "ctl";
@@ -20,6 +21,7 @@ static const char *TAG = "ctl";
 typedef enum { WAKE_NONE = 0, WAKE_BOOT, WAKE_PWR, WAKE_IMU } wake_src_t;
 
 static bool s_screen_on = false;
+static uint32_t s_awake_ms = CONFIG_WATCH_AWAKE_MS;
 static bool s_lvgl_paused = false;
 static int s_imu_idle_level = 0;     /* INT1 level after arming; a change from it = motion */
 
@@ -44,7 +46,8 @@ static void screen_on(const char *why)
     }
     faces_set_active(true);                          /* draws the current time first */
     vTaskDelay(pdMS_TO_TICKS(60));                   /* let that frame reach the panel */
-    bsp_display_brightness_set(CONFIG_WATCH_BRIGHTNESS);
+    bsp_display_brightness_set(settings_get_int("bright", CONFIG_WATCH_BRIGHTNESS));
+    s_awake_ms = (uint32_t)settings_get_int("awake_s", CONFIG_WATCH_AWAKE_MS / 1000) * 1000;
     touch_activity();
     s_screen_on = true;
 }
@@ -116,7 +119,8 @@ static void run_screen_on(void)
                 idle = lv_display_get_inactive_time(NULL);
                 bsp_display_unlock();
             }
-            if (idle >= CONFIG_WATCH_AWAKE_MS) {
+            uint32_t limit = settings_ui_is_open() ? 60000 : s_awake_ms;   /* longer while in Settings */
+            if (idle >= limit) {
                 screen_off("timeout");
                 return;
             }
