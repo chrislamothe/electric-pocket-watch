@@ -1,0 +1,69 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Electric Pocket Watch</title>
+<script type="module" src="https://unpkg.com/esp-web-tools@10/dist/web/install-button.js?module"></script>
+<style>
+  :root { --bg:#0d0c0a; --card:#17150f; --ink:#efe8d6; --dim:#a89f88; --brass:#c9a04a; --line:#2c281e; }
+  * { box-sizing: border-box; }
+  body { margin:0; background:var(--bg); color:var(--ink); font:16px/1.55 Georgia, "Times New Roman", serif; }
+  main { max-width:640px; margin:0 auto; padding:48px 16px 64px; }
+  h1 { font-weight:normal; font-size:2.1rem; letter-spacing:.02em; margin:0 0 4px; }
+  .sub { color:var(--dim); margin:0 0 32px; }
+  .card { background:var(--card); border:1px solid var(--line); border-radius:14px; padding:24px; margin-bottom:20px; }
+  h2 { font-size:1.05rem; font-weight:normal; color:var(--brass); text-transform:uppercase; letter-spacing:.12em; margin:0 0 12px; }
+  ol { padding-left:1.2em; margin:0; } li { margin:6px 0; }
+  .dim { color:var(--dim); font-size:.92rem; }
+  esp-web-install-button button[slot="activate"] {
+    background:var(--brass); color:#1a1408; border:0; border-radius:999px; padding:14px 28px;
+    font:600 1rem system-ui, sans-serif; cursor:pointer;
+  }
+  .warn { color:#e6a15a; }
+</style>
+</head>
+<body>
+<main>
+  <h1>Electric Pocket Watch</h1>
+  <p class="sub">Firmware for the Waveshare ESP32-S3-Touch-AMOLED-1.75C &middot; version <span id="ver">__VERSION__</span></p>
+
+  <div class="card">
+    <h2>Install or set up Wi-Fi</h2>
+    <esp-web-install-button manifest="manifest.json">
+      <button slot="activate">Connect watch</button>
+      <span slot="unsupported" class="warn">This browser can't talk to USB devices. Use Chrome or Edge on a computer.</span>
+      <span slot="not-allowed" class="warn">This page must be opened over https.</span>
+    </esp-web-install-button>
+    <p class="dim">Plug the watch into this computer with a USB-C data cable, click <b>Connect watch</b>, and pick the watch's port (USB JTAG/serial debug unit).</p>
+  </div>
+
+  <div class="card">
+    <h2>First install</h2>
+    <ol>
+      <li>Click <b>Connect watch</b> and choose <b>Install Electric Pocket Watch</b>.</li>
+      <li>When it finishes, the page asks for your Wi-Fi network and password. The watch joins once, sets its clock, and turns Wi-Fi off again.</li>
+    </ol>
+    <p class="dim">Use a 2.4 GHz network. Installing again erases the saved Wi-Fi.</p>
+  </div>
+
+  <div class="card">
+    <h2>Change Wi-Fi later</h2>
+    <ol>
+      <li>Plug the watch in and click <b>Connect watch</b>.</li>
+      <li>Choose <b>Change Wi-Fi</b> (or <b>Connect to Wi-Fi</b>) and enter the network.</li>
+    </ol>
+  </div>
+
+  <div class="card">
+    <h2>On the watch</h2>
+    <ol>
+      <li><b>Wake:</b> press BOOT or PWR, or double-tap the case.</li>
+      <li><b>Change face:</b> press BOOT or swipe.</li>
+      <li><b>Set the time:</b> hold BOOT for a second while the screen is on.</li>
+      <li><b>Screen off:</b> press PWR. Holding PWR for several seconds powers the watch off.</li>
+    </ol>
+  </div>
+</main>
+</body>
+</html>
