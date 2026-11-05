@@ -13,6 +13,8 @@ typedef enum {
     NET_CONNECT_FAILED,
     NET_NTP_FAILED,
     NET_BUSY,
+    NET_NOT_FOUND,          /* saved network not in range and no open network worked */
+    NET_OPEN_BLOCKED,       /* joined an open network but NTP was blocked (login page) */
 } net_result_t;
 
 typedef struct {
@@ -44,9 +46,9 @@ void net_forget(void);       /* erase the saved network */
 bool net_busy(void);     /* radio in use (sync, scan, provisioning): do not light-sleep */
 const char *net_result_text(net_result_t r);
 
-/* Sync the clock over SNTP: saved network first; if that fails or none is saved and setting
- * "open_wifi" (default on) allows it, the three strongest open networks. Radio off afterwards.
- * Blocks up to ~25 s, longer when open networks are tried. */
+/* Sync the clock over SNTP. Scans first; joins the saved network if it is in range; otherwise
+ * (or if that fails) and setting "open_wifi" (default on) allows it, the three strongest open
+ * networks. Radio off afterwards. Blocks ~5-60 s depending on what is tried. */
 net_result_t net_sync_time(void);
 
 /* Connect with new credentials; on success save them, sync the clock, radio off. */

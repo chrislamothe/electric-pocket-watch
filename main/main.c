@@ -28,6 +28,17 @@
 
 static const char *TAG = "pocketwatch";
 
+/* The 1.75C has no RTC chip, so the clock is lost on every power-off. Try one sync shortly after
+ * boot (saved network, or an open one if allowed); the result shows under Settings > Wi-Fi. */
+static void boot_sync_task(void *arg)
+{
+    (void)arg;
+    vTaskDelay(pdMS_TO_TICKS(3000));
+    net_result_t r = net_sync_time();
+    ESP_LOGI(TAG, "boot time sync: %s", net_result_text(r));
+    vTaskDelete(NULL);
+}
+
 static void stage1_loop(void)
 {
     bsp_display_brightness_set(CONFIG_WATCH_BRIGHTNESS);
@@ -98,6 +109,7 @@ void app_main(void)
 #if CONFIG_WATCH_STAGE == 1
     stage1_loop();
 #else
+    xTaskCreate(boot_sync_task, "boot_sync", 6144, NULL, 3, NULL);
     controller_run();
 #endif
 }

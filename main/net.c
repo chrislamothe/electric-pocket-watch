@@ -17,9 +17,9 @@ static const char *TAG = "net";
 
 #define BIT_GOT_IP  BIT0
 #define BIT_FAILED  BIT1
-#define CONNECT_TIMEOUT_MS 15000
-#define OPEN_CONNECT_TIMEOUT_MS 8000
+#define CONNECT_TIMEOUT_MS 15000            /* association + DHCP; public networks can be slow */
 #define OPEN_MAX_TRIES     3
+#define MAX_SCAN           20
 #define NTP_TIMEOUT_MS     10000
 #define MAX_RETRIES        3
 
@@ -62,6 +62,8 @@ const char *net_result_text(net_result_t r)
     case NET_NO_CREDENTIALS: return "No Wi-Fi set up";
     case NET_CONNECT_FAILED: return "Wi-Fi failed";
     case NET_NTP_FAILED:     return "Time server failed";
+    case NET_NOT_FOUND:      return "No usable network in range";
+    case NET_OPEN_BLOCKED:   return "Open Wi-Fi joined, internet blocked";
     case NET_BUSY:           return "Busy";
     }
     return "?";
@@ -74,7 +76,12 @@ static void on_event(void *arg, esp_event_base_t base, int32_t id, void *data)
             esp_wifi_connect();
         }
     } else if (base == WIFI_EVENT && id == WIFI_EVENT_STA_DISCONNECTED) {
-        if (s_want_connect && s_retries++ < MAX_RETRIES) {
+        if (!s_want_connect) {
+            return;                                 /* our own disconnect/stop, or a stale event */
+        }
+        wifi_event_sta_disconnected_t *d = data;
+        ESP_LOGI(TAG, "disconnected, reason %d", d ? d->reason : -1);
+        if (s_retries++ < MAX_RETRIES) {
             esp_wifi_connect();
         } else {
             xEventGroupSetBits(s_ev, BIT_FAILED);
@@ -148,6 +155,7 @@ static void radio_off(void)
     if (s_inited) {
         esp_wifi_disconnect();
         esp_wifi_stop();
+        vTaskDelay(pdMS_TO_TICKS(100));             /* let the event loop drain stop/disconnect */
     }
 }
 
@@ -169,7 +177,7 @@ static bool sync_ntp(void)
     return ok;
 }
 
-static net_result_t sync_via_open_locked(void);
+static int scan_locked(net_ap_t *out, int max);
 
 bool net_busy(void)
 {
@@ -182,6 +190,12 @@ void net_init(void)
     s_ev = xEventGroupCreate();
 }
 
+/*
+ * Scan first, then:
+ *   1. the saved network, if it is in range (or the scan saw nothing, e.g. a hidden SSID);
+ *   2. if that did not sync and "open_wifi" is on, the strongest open networks (up to 3).
+ * A captive-portal network joins fine but blocks NTP; it is reported as such and skipped.
+ */
 net_result_t net_sync_time(void)
 {
     char ssid[33], pass[65];
@@ -196,22 +210,63 @@ net_result_t net_sync_time(void)
     if (xSemaphoreTake(s_lock, 0) != pdTRUE) {
         return NET_BUSY;
     }
-    net_result_t r = have_saved ? NET_CONNECT_FAILED : NET_NO_CREDENTIALS;
+
+    static net_ap_t aps[MAX_SCAN];
+    int n = scan_locked(aps, MAX_SCAN);
+    net_result_t r = NET_NOT_FOUND;
+    const char *used = "";
+
     if (have_saved) {
-        if (wifi_join(ssid, pass, CONNECT_TIMEOUT_MS)) {
-            r = sync_ntp() ? NET_OK : NET_NTP_FAILED;
+        bool visible = (n == 0);
+        for (int i = 0; i < n && !visible; i++) {
+            visible = strcmp(aps[i].ssid, ssid) == 0;
         }
-        radio_off();
+        if (visible) {
+            ESP_LOGI(TAG, "saved network '%s' in range", ssid);
+            used = ssid;
+            r = NET_CONNECT_FAILED;
+            if (wifi_join(ssid, pass, CONNECT_TIMEOUT_MS)) {
+                r = sync_ntp() ? NET_OK : NET_NTP_FAILED;
+            }
+            radio_off();
+        } else {
+            ESP_LOGI(TAG, "saved network '%s' not in range", ssid);
+        }
     }
+
     if (r != NET_OK && allow_open) {
-        net_result_t o = sync_via_open_locked();
-        if (o == NET_OK_OPEN || !have_saved) {
-            r = o;
+        int tried = 0;
+        for (int i = 0; i < n && tried < OPEN_MAX_TRIES; i++) {
+            if (aps[i].secured || (have_saved && strcmp(aps[i].ssid, ssid) == 0)) {
+                continue;
+            }
+            tried++;
+            ESP_LOGI(TAG, "trying open network '%s' (%d dBm)", aps[i].ssid, aps[i].rssi);
+            bool joined = wifi_join(aps[i].ssid, "", CONNECT_TIMEOUT_MS);
+            bool synced = joined && sync_ntp();
+            radio_off();
+            if (synced) {
+                r = NET_OK_OPEN;
+                used = aps[i].ssid;
+                break;
+            }
+            if (joined && r != NET_NTP_FAILED) {
+                r = NET_OPEN_BLOCKED;                   /* likely a login page */
+                used = aps[i].ssid;
+            } else if (!joined && r == NET_NOT_FOUND) {
+                r = NET_CONNECT_FAILED;
+                used = aps[i].ssid;
+            }
+        }
+        if (!tried) {
+            ESP_LOGI(TAG, "no open networks in range");
         }
     }
-    if (r != NET_OK_OPEN) {
-        record(r, have_saved ? ssid : "");
+    if (r == NET_NOT_FOUND && !have_saved && !allow_open) {
+        r = NET_NO_CREDENTIALS;
     }
+    record(r, used);
+    ESP_LOGI(TAG, "time sync result: %s", net_result_text(r));
     xSemaphoreGive(s_lock);
     return r;
 }
@@ -284,31 +339,4 @@ int net_scan(net_ap_t *out, int max)
     int count = scan_locked(out, max);
     xSemaphoreGive(s_lock);
     return count;
-}
-
-/* Caller holds s_lock. Try the strongest open networks; captive-portal networks (hotels, cafes)
- * usually block NTP until someone logs in, so they simply fail and the next one is tried. */
-static net_result_t sync_via_open_locked(void)
-{
-    static net_ap_t aps[20];
-    int n = scan_locked(aps, 20);
-    int tried = 0;
-    for (int i = 0; i < n && tried < OPEN_MAX_TRIES; i++) {
-        if (aps[i].secured) {
-            continue;
-        }
-        tried++;
-        ESP_LOGI(TAG, "trying open network '%s' (%d dBm)", aps[i].ssid, aps[i].rssi);
-        if (wifi_join(aps[i].ssid, "", OPEN_CONNECT_TIMEOUT_MS)) {
-            bool ok = sync_ntp();
-            radio_off();
-            if (ok) {
-                record(NET_OK_OPEN, aps[i].ssid);
-                return NET_OK_OPEN;
-            }
-        } else {
-            radio_off();
-        }
-    }
-    return tried ? NET_CONNECT_FAILED : NET_NO_CREDENTIALS;
 }

@@ -539,8 +539,8 @@ static void build_wifi(void)
 
     item(s_list, "Choose network", on_to_networks, NULL);
     item(s_list, "Set time now", on_sync, NULL);
-    char txt[32];
-    snprintf(txt, sizeof(txt), "Open Wi-Fi: %s", settings_get_int("open_wifi", 1) ? "On" : "Off");
+    char txt[40];
+    snprintf(txt, sizeof(txt), "Use open Wi-Fi: %s", settings_get_int("open_wifi", 1) ? "On" : "Off");
     item(s_list, txt, on_open_wifi, NULL);
     char ssid[33];
     if (settings_get_str("ssid", ssid, sizeof(ssid))) {
