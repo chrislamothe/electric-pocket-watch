@@ -11,7 +11,7 @@ jobs:
     runs-on: ubuntu-latest
     container: espressif/idf:v5.5.5
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - name: Build firmware (stage 1 and stage 2)
         shell: bash
@@ -38,7 +38,7 @@ jobs:
           grep -E "^  [a-z].*:$|^    version:" dependencies.lock | paste - - | head -40
 
       - name: Upload firmware
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: firmware
           path: |
@@ -62,8 +62,8 @@ jobs:
       name: github-pages
       url: ${{ steps.deploy.outputs.page_url }}
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/download-artifact@v4
+      - uses: actions/checkout@v7
+      - uses: actions/download-artifact@v8
         with:
           name: firmware
           path: fw
@@ -78,8 +78,8 @@ jobs:
           sed -i "s/__VERSION__/$VER/g" _site/index.html _site/manifest.json
           ls -l _site
           cat _site/manifest.json
-      - uses: actions/upload-pages-artifact@v3
+      - uses: actions/upload-pages-artifact@v5
         with:
           path: _site
       - id: deploy
-        uses: actions/deploy-pages@v4
+        uses: actions/deploy-pages@v5
