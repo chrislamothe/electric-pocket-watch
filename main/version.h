@@ -1,3 +1,3 @@
 #pragma once
 #define WATCH_NAME    "Electric Pocket Watch"
-#define WATCH_VERSION "0.4.3"
+#define WATCH_VERSION "0.5.0"

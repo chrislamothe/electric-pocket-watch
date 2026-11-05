@@ -37,3 +37,4 @@ void faces_show_status(const char *text, int hide_after_ms);
 extern const watch_face_t face_roman;
 extern const watch_face_t face_arabic;
 extern const watch_face_t face_black;
+extern const watch_face_t face_calendar;
