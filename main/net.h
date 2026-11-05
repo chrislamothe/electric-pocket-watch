@@ -22,6 +22,7 @@ typedef struct {
 } net_ap_t;
 
 void net_init(void);
+bool net_busy(void);     /* radio in use (sync, scan, provisioning): do not light-sleep */
 const char *net_result_text(net_result_t r);
 
 /* Sync the clock over SNTP: saved network first; if that fails or none is saved and setting

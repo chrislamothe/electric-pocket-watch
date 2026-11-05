@@ -3,6 +3,7 @@
 #include "esp_log.h"
 #include "bsp/esp-bsp.h"
 #include "settings.h"
+#include "settings_ui.h"
 #include "watch_time.h"
 
 static const char *TAG = "faces";
@@ -66,6 +67,12 @@ static void async_step(void *arg)
     select_face((int)(intptr_t)arg);
 }
 
+static void open_settings_cb(void *arg)
+{
+    (void)arg;
+    settings_ui_open_nolock();
+}
+
 static void gesture_cb(lv_event_t *e)
 {
     (void)e;
@@ -74,6 +81,10 @@ static void gesture_cb(lv_event_t *e)
         return;
     }
     lv_dir_t dir = lv_indev_get_gesture_dir(indev);
+    if (dir == LV_DIR_TOP) {
+        lv_async_call(open_settings_cb, NULL);
+        return;
+    }
     if (dir == LV_DIR_LEFT || dir == LV_DIR_RIGHT) {
         /* Deleting the face from inside its own event callback is unsafe: defer. */
         lv_async_call(async_step, (void *)(intptr_t)(dir == LV_DIR_LEFT ? 1 : -1));
@@ -85,6 +96,10 @@ void faces_init(void)
     lv_obj_t *scr = lv_screen_active();
     lv_obj_set_style_bg_color(scr, lv_color_black(), 0);
     lv_obj_set_style_bg_opa(scr, LV_OPA_COVER, 0);
+    s_theme = settings_get_int("theme", 0);
+    if (s_theme < 0 || s_theme >= WATCH_THEME_COUNT) {
+        s_theme = 0;
+    }
     s_index = settings_get_int("face", 0);
     if (s_index < 0 || s_index >= FACE_COUNT) {
         s_index = 0;
@@ -105,13 +120,18 @@ static void step_locked(int step)
 void faces_next(void) { step_locked(1); }
 void faces_prev(void) { step_locked(-1); }
 
+void faces_set_theme_nolock(int theme)
+{
+    s_theme = ((theme % WATCH_THEME_COUNT) + WATCH_THEME_COUNT) % WATCH_THEME_COUNT;
+    build_current();
+}
+
 void faces_set_theme(int theme)
 {
     if (bsp_display_lock(500) != ESP_OK) {
         return;
     }
-    s_theme = ((theme % WATCH_THEME_COUNT) + WATCH_THEME_COUNT) % WATCH_THEME_COUNT;
-    build_current();
+    faces_set_theme_nolock(theme);
     bsp_display_unlock();
 }
 

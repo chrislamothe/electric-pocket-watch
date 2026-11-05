@@ -25,6 +25,7 @@ void faces_init(void);
 void faces_next(void);
 void faces_prev(void);
 void faces_set_theme(int theme);
+void faces_set_theme_nolock(int theme);   /* caller holds the LVGL lock */
 int  faces_theme(void);
 
 /* Pause/resume redraws while the screen is off. Resume draws the current time immediately. */

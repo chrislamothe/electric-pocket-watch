@@ -15,6 +15,7 @@ typedef enum {
     BTN_EVT_NONE = 0,
     BTN_BOOT_SHORT,     /* released before the long-press time */
     BTN_BOOT_LONG,      /* reported once, while still held */
+    BTN_BOOT_DOUBLE,    /* two short presses within DOUBLE_PRESS_MS */
     BTN_PWR_SHORT,
     BTN_PWR_LONG,
 } btn_evt_t;
@@ -29,5 +30,6 @@ bool buttons_pwr_down_raw(void);
  * currently held (used right after a button woke the watch). */
 void buttons_sync_and_consume(void);
 
-/* Call every ~10 ms. Returns at most one event per call. */
+/* Call every ~10 ms. Returns at most one event per call. A single BOOT short press is reported
+ * DOUBLE_PRESS_MS after release, once it is clear no second press follows. */
 btn_evt_t buttons_poll(void);

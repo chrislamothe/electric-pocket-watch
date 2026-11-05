@@ -141,6 +141,11 @@ static bool sync_ntp(void)
 
 static net_result_t sync_via_open_locked(void);
 
+bool net_busy(void)
+{
+    return s_lock && uxSemaphoreGetCount(s_lock) == 0;
+}
+
 void net_init(void)
 {
     s_lock = xSemaphoreCreateMutex();

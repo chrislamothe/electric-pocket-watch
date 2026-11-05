@@ -26,7 +26,7 @@ jobs:
             idf.py -B $B -D SDKCONFIG=$B/sdkconfig -D SDKCONFIG_DEFAULTS="$DEFAULTS" set-target esp32s3
             idf.py -B $B -D SDKCONFIG=$B/sdkconfig -D SDKCONFIG_DEFAULTS="$DEFAULTS" build
             echo "== stage $STAGE: key config values (a missing line means the option was ignored) =="
-            grep -E "^CONFIG_(WATCH_STAGE|LV_USE_CLIB_MALLOC|LV_OS_FREERTOS|LV_USE_LOG|LV_LOG_PRINTF|RTC_CLK_SRC_INT_8MD256|LV_FONT_MONTSERRAT_16|LV_FONT_MONTSERRAT_28|LV_FONT_MONTSERRAT_36|LV_FONT_MONTSERRAT_48|SPIRAM_MODE_OCT|ESP_CONSOLE_USB_SERIAL_JTAG|PARTITION_TABLE_CUSTOM)=" $B/sdkconfig || true
+            grep -E "^CONFIG_(WATCH_STAGE|LV_USE_CLIB_MALLOC|LV_OS_FREERTOS|LV_USE_LOG|LV_LOG_PRINTF|RTC_CLK_SRC_INT_8MD256|LV_FONT_MONTSERRAT_16|LV_FONT_MONTSERRAT_28|LV_FONT_MONTSERRAT_36|LV_FONT_MONTSERRAT_48|SPIRAM_MODE_OCT|ESP_CONSOLE_USB_SERIAL_JTAG|PARTITION_TABLE_CUSTOM|LV_THEME_DEFAULT_DARK|LV_USE_KEYBOARD)=" $B/sdkconfig || true
             idf.py -B $B -D SDKCONFIG=$B/sdkconfig size
             idf.py -B $B -D SDKCONFIG=$B/sdkconfig merge-bin -o merged-stage$STAGE.bin
             F=$(find . -name merged-stage$STAGE.bin | head -1)

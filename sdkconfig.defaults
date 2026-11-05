@@ -22,6 +22,8 @@ CONFIG_LV_OS_FREERTOS=y
 CONFIG_LV_OBJ_STYLE_CACHE=y
 CONFIG_LV_DEF_REFR_PERIOD=15
 CONFIG_LV_DRAW_SW_DRAW_UNIT_CNT=2
+# Dark default theme for the settings keyboard and text field.
+CONFIG_LV_THEME_DEFAULT_DARK=y
 # LVGL warnings and asserts go to the serial console instead of hanging silently.
 CONFIG_LV_USE_LOG=y
 CONFIG_LV_LOG_LEVEL_WARN=y

@@ -13,6 +13,7 @@
 #include "faces.h"
 #include "imu.h"
 #include "net.h"
+#include "settings_ui.h"
 
 static const char *TAG = "ctl";
 
@@ -51,6 +52,7 @@ static void screen_on(const char *why)
 static void screen_off(const char *why)
 {
     ESP_LOGI(TAG, "screen OFF (%s)", why);
+    settings_ui_close();
     bsp_display_brightness_set(0);
     faces_set_active(false);
     /* Stop the LVGL worker (waits for any flush in progress) before light sleep, as the
@@ -71,8 +73,18 @@ static void run_screen_on(void)
     while (s_screen_on) {
         switch (buttons_poll()) {
         case BTN_BOOT_SHORT:
-            ESP_LOGI(TAG, "BOOT short: next face");
-            faces_next();
+            if (settings_ui_is_open()) {
+                ESP_LOGI(TAG, "BOOT short: close settings");
+                settings_ui_close();
+            } else {
+                ESP_LOGI(TAG, "BOOT short: next face");
+                faces_next();
+            }
+            touch_activity();
+            break;
+        case BTN_BOOT_DOUBLE:
+            ESP_LOGI(TAG, "BOOT double: settings");
+            settings_ui_toggle();
             touch_activity();
             break;
         case BTN_BOOT_LONG:
@@ -94,6 +106,9 @@ static void run_screen_on(void)
             break;
         default:
             break;
+        }
+        if (settings_ui_busy() || net_busy()) {
+            touch_activity();                        /* keep the screen on during Wi-Fi work */
         }
         if ((++n % 20) == 0) {                       /* every ~200 ms */
             uint32_t idle = 0;
@@ -155,10 +170,13 @@ static void arm_for_sleep(void)
 static wake_src_t wait_for_wake(void)
 {
 #ifdef CONFIG_WATCH_SLEEP_ON_USB
-    const bool light = true;
+    bool light = true;
 #else
-    const bool light = !axp_vbus_good();
+    bool light = !axp_vbus_good();
 #endif
+    if (net_busy()) {
+        light = false;                               /* Wi-Fi is in use: idle instead of sleeping */
+    }
     if (light) {
         gpio_wakeup_enable(PIN_BOOT, GPIO_INTR_LOW_LEVEL);
         gpio_wakeup_enable(PIN_PWR, GPIO_INTR_HIGH_LEVEL);

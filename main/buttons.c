@@ -4,6 +4,10 @@
 
 #define DEBOUNCE_SAMPLES 3          /* 3 x 10 ms */
 #define LONG_PRESS_MS    800
+#define DOUBLE_PRESS_MS  350
+
+static bool s_boot_pending;          /* one BOOT short press seen, waiting for a second */
+static int64_t s_boot_pending_ms;
 
 typedef struct {
     gpio_num_t pin;
@@ -58,6 +62,7 @@ static void sync_one(button_t *b)
 
 void buttons_sync_and_consume(void)
 {
+    s_boot_pending = false;
     sync_one(&s_boot);
     sync_one(&s_pwr);
 }
@@ -101,11 +106,23 @@ btn_evt_t buttons_poll(void)
         return BTN_PWR_LONG;
     }
     r = step(&s_boot);
+    int64_t t = now_ms();
     if (r == 1) {
-        return BTN_BOOT_SHORT;
+        if (s_boot_pending) {
+            s_boot_pending = false;
+            return BTN_BOOT_DOUBLE;
+        }
+        s_boot_pending = true;
+        s_boot_pending_ms = t;
+        return BTN_EVT_NONE;
     }
     if (r == 2) {
+        s_boot_pending = false;
         return BTN_BOOT_LONG;
+    }
+    if (s_boot_pending && !s_boot.down && (t - s_boot_pending_ms) >= DOUBLE_PRESS_MS) {
+        s_boot_pending = false;
+        return BTN_BOOT_SHORT;
     }
     return BTN_EVT_NONE;
 }

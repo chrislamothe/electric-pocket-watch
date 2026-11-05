@@ -22,6 +22,7 @@
 #include "improv.h"
 #include "net.h"
 #include "settings.h"
+#include "settings_ui.h"
 #include "version.h"
 #include "watch_time.h"
 
@@ -57,6 +58,7 @@ void app_main(void)
              __DATE__, __TIME__);
     settings_init();
     net_init();
+    settings_ui_init();
 
     ESP_ERROR_CHECK(bsp_i2c_init());
     ESP_LOGI(TAG, "step: display start");
