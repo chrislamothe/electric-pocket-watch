@@ -33,3 +33,6 @@ CONFIG_LV_LOG_PRINTF=y
 # oscillator is more stable than the default 136 kHz RC for timekeeping in sleep
 # (ESP-IDF system_time docs), at about 5 uA more sleep current.
 CONFIG_RTC_CLK_SRC_INT_8MD256=y
+# A firmware hang (task watchdog: a CPU's idle task starved for 5 s) panics and reboots
+# instead of leaving a frozen or black screen.
+CONFIG_ESP_TASK_WDT_PANIC=y

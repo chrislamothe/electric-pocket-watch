@@ -26,6 +26,9 @@
 #include "freertos/queue.h"
 #include "freertos/task.h"
 #include "esp_log.h"
+#include "esp_system.h"
+#include "axp.h"
+#include "version.h"
 #include "bsp/esp-bsp.h"
 #include "faces.h"
 #include "net.h"
@@ -43,7 +46,7 @@ static const char *TAG = "settings_ui";
 #define COL_BAD     0xD9734E
 #define MAX_APS     20
 
-typedef enum { PAGE_MAIN, PAGE_WIFI, PAGE_NETWORKS, PAGE_PASSWORD, PAGE_DISPLAY } page_t;
+typedef enum { PAGE_MAIN, PAGE_WIFI, PAGE_NETWORKS, PAGE_PASSWORD, PAGE_DISPLAY, PAGE_SYSTEM } page_t;
 typedef enum { JOB_SCAN, JOB_JOIN, JOB_SYNC } job_type_t;
 
 typedef struct {
@@ -74,6 +77,7 @@ static net_ap_t s_aps[MAX_APS];
 static int s_ap_count;
 static char s_sel_ssid[33];
 static char s_note[64];             /* one-shot message for the next page build */
+static bool s_reset_armed;          /* factory reset needs a second tap */
 
 static const char *const THEME_NAMES[WATCH_THEME_COUNT] = {"Brass", "Silver", "Dark"};
 static const int AWAKE_CHOICES[] = {5, 10, 20, 30};
@@ -387,6 +391,32 @@ static void on_close(lv_event_t *e)
 static void on_to_main(lv_event_t *e)     { (void)e; go(PAGE_MAIN); }
 static void on_to_wifi(lv_event_t *e)     { (void)e; go(PAGE_WIFI); }
 static void on_to_display(lv_event_t *e)  { (void)e; go(PAGE_DISPLAY); }
+static void on_to_system(lv_event_t *e)   { (void)e; s_reset_armed = false; go(PAGE_SYSTEM); }
+
+static void on_restart(lv_event_t *e)
+{
+    (void)e;
+    ESP_LOGW(TAG, "restart from Settings");
+    bsp_display_brightness_set(0);
+    esp_restart();
+}
+
+static void on_factory_reset(lv_event_t *e)
+{
+    lv_obj_t *btn = lv_event_get_current_target_obj(e);
+    if (!s_reset_armed) {
+        s_reset_armed = true;
+        lv_obj_t *l = lv_obj_get_child(btn, 0);
+        if (l) {
+            lv_label_set_text(l, "Tap again to erase");
+        }
+        lv_obj_set_style_bg_color(btn, lv_color_hex(0x5A2A1E), 0);
+        set_status("Erases Wi-Fi, brightness, theme and face, then restarts");
+        return;
+    }
+    bsp_display_brightness_set(0);
+    settings_factory_reset();
+}
 static void on_to_networks(lv_event_t *e) { (void)e; s_ap_count = -1; go(PAGE_NETWORKS); }
 
 static void on_sync(lv_event_t *e)
@@ -492,6 +522,8 @@ static void build_main(void)
     item2(s_list, "Display", txt, COL_DIM, on_to_display);
     snprintf(txt, sizeof(txt), "Theme: %s", THEME_NAMES[faces_theme()]);
     item(s_list, txt, on_theme, NULL);
+    snprintf(txt, sizeof(txt), "v%s", WATCH_VERSION);
+    item2(s_list, "System", txt, COL_DIM, on_to_system);
     item(s_list, "Close", on_close, NULL);
 }
 
@@ -590,6 +622,26 @@ static void build_display(void)
     item(s_list, "Back", on_to_main, NULL);
 }
 
+static void build_system(void)
+{
+    frame("System", 320);
+    char buf[96];
+    int pct = axp_battery_percent();
+    const char *src = axp_vbus_good() ? "USB power" : "on battery";
+    if (pct >= 0) {
+        snprintf(buf, sizeof(buf), "%s %s\nBattery %d%%, %s", WATCH_NAME, WATCH_VERSION, pct, src);
+    } else {
+        snprintf(buf, sizeof(buf), "%s %s\nBattery unknown, %s", WATCH_NAME, WATCH_VERSION, src);
+    }
+    lv_obj_t *info = label(s_list, buf, &lv_font_montserrat_16, COL_TEXT);
+    lv_obj_set_width(info, lv_pct(100));
+    lv_label_set_long_mode(info, LV_LABEL_LONG_MODE_WRAP);
+    item(s_list, "Restart", on_restart, NULL);
+    item(s_list, "Factory reset", on_factory_reset, NULL);
+    item(s_list, "Back", on_to_main, NULL);
+    set_status("Frozen? Hold PWR 6 s to power off, then press PWR.");
+}
+
 static void build_cb(void *arg)
 {
     if (!s_panel) {
@@ -602,6 +654,7 @@ static void build_cb(void *arg)
     case PAGE_NETWORKS: build_networks(); break;
     case PAGE_PASSWORD: build_password(); break;
     case PAGE_DISPLAY:  build_display(); break;
+    case PAGE_SYSTEM:   build_system(); break;
     }
 }
 

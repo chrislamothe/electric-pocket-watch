@@ -46,3 +46,22 @@ int axp_battery_percent(void)
     }
     return pct > 100 ? 100 : pct;
 }
+
+void axp_configure_power_key(void)
+{
+    uint8_t en = 0, lvl = 0;
+    if (!s_axp || i2c_reg_read(s_axp, 0x22, &en, 1) != ESP_OK || i2c_reg_read(s_axp, 0x27, &lvl, 1) != ESP_OK) {
+        return;
+    }
+    uint8_t en_new = (uint8_t)((en | 0x02) & ~0x01);        /* long press shuts down, not restart */
+    uint8_t lvl_new = (uint8_t)((lvl & 0xF3) | (1 << 2));   /* 6 s */
+    if (en_new != en) {
+        i2c_reg_write(s_axp, 0x22, en_new);
+    }
+    if (lvl_new != lvl) {
+        i2c_reg_write(s_axp, 0x27, lvl_new);
+    }
+    i2c_reg_read(s_axp, 0x22, &en, 1);
+    i2c_reg_read(s_axp, 0x27, &lvl, 1);
+    ESP_LOGI(TAG, "power key: 0x22=%02X 0x27=%02X (hold PWR %d s to power off)", en, lvl, 4 + 2 * ((lvl >> 2) & 3));
+}

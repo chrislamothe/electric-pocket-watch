@@ -3,6 +3,7 @@
 #include "esp_log.h"
 #include "nvs.h"
 #include "nvs_flash.h"
+#include "esp_system.h"
 
 static const char *TAG = "settings";
 static nvs_handle_t s_nvs;
@@ -61,4 +62,15 @@ void settings_erase(const char *key)
     if (s_ok && nvs_erase_key(s_nvs, key) == ESP_OK) {
         nvs_commit(s_nvs);
     }
+}
+
+void settings_factory_reset(void)
+{
+    ESP_LOGW(TAG, "factory reset: erasing NVS and rebooting");
+    if (s_ok) {
+        nvs_close(s_nvs);
+        s_ok = false;
+    }
+    nvs_flash_erase();
+    esp_restart();
 }

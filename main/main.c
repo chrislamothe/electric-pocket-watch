@@ -73,6 +73,8 @@ void app_main(void)
     ESP_LOGI(TAG, "step: PMIC");
     if (!axp_init(bus)) {
         ESP_LOGE(TAG, "PMIC not available");
+    } else {
+        axp_configure_power_key();
     }
     ESP_LOGI(TAG, "step: IMU");
     if (!imu_init(bus)) {
