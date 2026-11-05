@@ -38,3 +38,4 @@ extern const watch_face_t face_roman;
 extern const watch_face_t face_arabic;
 extern const watch_face_t face_black;
 extern const watch_face_t face_calendar;
+extern const watch_face_t face_railroad;
