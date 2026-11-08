@@ -35,9 +35,9 @@ bool axp_init(i2c_master_bus_handle_t bus)
         i2c_reg_write(s_axp, 0x68, v | 0x01);              /* battery detection on */
     }
     vTaskDelay(pdMS_TO_TICKS(20));                          /* first ADC conversion */
-    ESP_LOGI(TAG, "battery %d mV (%d%% by voltage), gauge %d%%, charge state %d, charge target %d mV",
+    ESP_LOGI(TAG, "battery %d mV (%d%% by voltage), gauge %d%%, charge state %d, charge target %d mV, power cut %d mV",
              axp_battery_mv(), axp_battery_percent(), axp_gauge_percent(), axp_charge_state(),
-             axp_charge_target_mv());
+             axp_charge_target_mv(), axp_shutdown_mv());
     return true;
 }
 
@@ -94,6 +94,12 @@ int axp_charge_target_mv(void)
     static const int MV[] = {-1, 4000, 4100, 4200, 4350, 4400, -1, -1};
     uint8_t v = 0;
     return rd(0x64, &v) ? MV[v & 0x07] : -1;
+}
+
+int axp_shutdown_mv(void)
+{
+    uint8_t v = 0;
+    return rd(0x24, &v) ? 2600 + 100 * (v & 0x07) : -1;
 }
 
 /* Typical single-cell LiPo resting voltage vs state of charge (4.2 V full). Light-load readings,

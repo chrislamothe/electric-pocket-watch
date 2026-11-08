@@ -88,6 +88,7 @@ void app_main(void)
         ESP_LOGE(TAG, "PMIC not available");
     } else {
         axp_configure_power_key();
+        battlog_init();
         battlog_sample("boot");
     }
     ESP_LOGI(TAG, "step: IMU");

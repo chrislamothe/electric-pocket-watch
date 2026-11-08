@@ -26,6 +26,7 @@ int axp_battery_mv(void);            /* battery voltage in mV, -1 if no battery 
 int axp_gauge_percent(void);         /* PMIC fuel-gauge %, -1 if unavailable */
 axp_charge_t axp_charge_state(void);
 int axp_charge_target_mv(void);      /* configured charge termination voltage, -1 if unknown */
+int axp_shutdown_mv(void);           /* VOFF: system powers off below this (0x24 bits[2:0], 2600 + 100*n) */
 
 /* Battery % used by the watch: from the measured voltage on a single-cell LiPo curve. The PMIC
  * gauge is only reported alongside, because its estimate depends on battery parameters that are

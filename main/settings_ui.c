@@ -401,6 +401,14 @@ static void on_restart(lv_event_t *e)
     esp_restart();
 }
 
+static void on_dump(lv_event_t *e)
+{
+    (void)e;
+    set_status("Sending battery log over USB...");
+    battlog_dump();
+    set_status("Battery log sent (lines start with BATTLOG)");
+}
+
 static void on_factory_reset(lv_event_t *e)
 {
     lv_obj_t *btn = lv_event_get_current_target_obj(e);
@@ -621,12 +629,13 @@ static void build_display(void)
 static void build_system(void)
 {
     frame("System", 320);
-    char buf[256];
+    char buf[420];
     int o = snprintf(buf, sizeof(buf), "%s %s\n", WATCH_NAME, WATCH_VERSION);
     battlog_summary(buf + o, sizeof(buf) - o);
     lv_obj_t *info = label(s_list, buf, &lv_font_montserrat_16, COL_TEXT);
     lv_obj_set_width(info, lv_pct(100));
     lv_label_set_long_mode(info, LV_LABEL_LONG_MODE_WRAP);
+    item(s_list, "Send log over USB", on_dump, NULL);
     item(s_list, "Restart", on_restart, NULL);
     item(s_list, "Factory reset", on_factory_reset, NULL);
     item(s_list, "Back", on_to_main, NULL);
