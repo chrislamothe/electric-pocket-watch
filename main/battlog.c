@@ -15,6 +15,12 @@ static const char *TAG = "battlog";
 #define SECTOR       4096
 #define VALID_EPOCH  1704067200u                /* 2024-01-01: anything earlier is an unset clock */
 #define FLAG_USB     0x01
+static const uint8_t MAGIC[4] = {'P', 'W', 'B', 'L'};
+
+static bool valid(const rec_t *r)
+{
+    return r->seq != 0xFFFFFFFF && memcmp(r->magic, MAGIC, sizeof(MAGIC)) == 0;
+}
 
 typedef struct __attribute__((packed)) {
     uint32_t seq;                               /* 0xFFFFFFFF = empty slot */
@@ -25,7 +31,8 @@ typedef struct __attribute__((packed)) {
     int8_t gauge;
     uint8_t flags;                              /* bit0 USB, bits[3:1] charge state */
     uint16_t wakes_button, wakes_tap, wakes_motion;
-    uint8_t pad[8];
+    uint8_t magic[4];                           /* "PWBL": rejects leftover factory/garbage data */
+    uint8_t pad[4];
 } rec_t;
 _Static_assert(sizeof(rec_t) == REC_SIZE, "record size");
 
@@ -54,7 +61,7 @@ void battlog_init(void)
     bool any = false;
     rec_t r;
     for (uint32_t i = 0; i < s_slots; i++) {
-        if (rd(i, &r) && r.seq != 0xFFFFFFFF && (!any || r.seq > best_seq)) {
+        if (rd(i, &r) && valid(&r) && (!any || r.seq > best_seq)) {
             any = true;
             best_seq = r.seq;
             best_slot = i;
@@ -92,7 +99,7 @@ static void for_each(visit_fn fn, void *ctx)
     rec_t r;
     for (uint32_t k = 0; k < s_slots; k++) {
         uint32_t i = (s_head + k) % s_slots;
-        if (rd(i, &r) && r.seq != 0xFFFFFFFF) {
+        if (rd(i, &r) && valid(&r)) {
             fn(&r, ctx);
         }
     }
@@ -129,6 +136,7 @@ void battlog_sample(const char *why)
     rec_t r;
     memset(&r, 0, sizeof(r));
     r.seq = s_seq++;
+    memcpy(r.magic, MAGIC, sizeof(MAGIC));
     r.epoch = (uint32_t)tv.tv_sec >= VALID_EPOCH ? (uint32_t)tv.tv_sec : 0;
     r.uptime_s = (uint32_t)(now / 1000000);
     r.boot = s_boot;
