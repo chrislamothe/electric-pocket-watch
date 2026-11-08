@@ -122,11 +122,6 @@ int axp_battery_percent(void)
     int mv = axp_battery_mv();
     return mv > 0 ? axp_mv_to_percent(mv) : -1;
 }
-    if (i2c_reg_read(s_axp, AXP_REG_BATPCT, &pct, 1) != ESP_OK) {
-        return -1;
-    }
-    return pct > 100 ? 100 : pct;
-}
 
 void axp_configure_power_key(void)
 {
