@@ -17,10 +17,6 @@ static const char *TAG = "battlog";
 #define FLAG_USB     0x01
 static const uint8_t MAGIC[4] = {'P', 'W', 'B', 'L'};
 
-static bool valid(const rec_t *r)
-{
-    return r->seq != 0xFFFFFFFF && memcmp(r->magic, MAGIC, sizeof(MAGIC)) == 0;
-}
 
 typedef struct __attribute__((packed)) {
     uint32_t seq;                               /* 0xFFFFFFFF = empty slot */
@@ -35,6 +31,11 @@ typedef struct __attribute__((packed)) {
     uint8_t pad[4];
 } rec_t;
 _Static_assert(sizeof(rec_t) == REC_SIZE, "record size");
+
+static bool valid(const rec_t *r)
+{
+    return r->seq != 0xFFFFFFFF && memcmp(r->magic, MAGIC, sizeof(MAGIC)) == 0;
+}
 
 static const esp_partition_t *s_part;
 static uint32_t s_slots, s_head, s_seq;         /* next slot to write, next sequence number */
