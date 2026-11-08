@@ -4,16 +4,31 @@
 #include "driver/i2c_master.h"
 
 /*
- * AXP2101 PMIC (I2C 0x34). Only reads are used: the PWR key long-press power-off is
- * handled by the PMIC itself, and its IRQ line is not routed to the ESP32 on the 1.75C.
- * STATUS1 (0x00): bit5 VBUS good, bit3 battery present (XPowersLib XPowersAXP2101.hpp).
- * Battery percentage: register 0xA4.
+ * AXP2101 PMIC (I2C 0x34). Its IRQ line is not routed to the ESP32 on the 1.75C, so it is polled.
+ * Register map per XPowersLib (XPowersAXP2101.hpp):
+ *   0x00 STATUS1: bit5 VBUS good, bit3 battery present
+ *   0x01 STATUS2: bits[7:5] 0 standby, 1 charging, 2 discharging
+ *   0x30 ADC channel enable: bit0 battery voltage
+ *   0x34/0x35 battery voltage, 13 bits ((0x34 & 0x1F) << 8 | 0x35), mV
+ *   0x64 charge target voltage: bits[2:0] 1=4.0 2=4.1 3=4.2 4=4.35 5=4.4 V
+ *   0x68 bit0 battery detection enable
+ *   0xA4 fuel-gauge percentage (depends on battery parameters loaded in the PMIC)
  */
+typedef enum { AXP_CHG_STANDBY = 0, AXP_CHG_CHARGING = 1, AXP_CHG_DISCHARGING = 2, AXP_CHG_UNKNOWN = 3 } axp_charge_t;
+
 bool axp_init(i2c_master_bus_handle_t bus);
 bool axp_vbus_good(void);
 
-/* PWR long press = PMIC power-off after 6 s, independent of the firmware (works even if it hangs).
- * Registers per XPowersLib: 0x22 bit1 long-press shutdown enable, bit0 restart(1)/off(0);
- * 0x27 bits[3:2] off time 0=4 s, 1=6 s, 2=8 s, 3=10 s. */
+/* PWR long press = PMIC power-off after 6 s (0x22 bit1 on, bit0 off; 0x27 bits[3:2]). */
 void axp_configure_power_key(void);
-int axp_battery_percent(void);   /* 0..100, or -1 when no battery / read failed */
+
+int axp_battery_mv(void);            /* battery voltage in mV, -1 if no battery / read failed */
+int axp_gauge_percent(void);         /* PMIC fuel-gauge %, -1 if unavailable */
+axp_charge_t axp_charge_state(void);
+int axp_charge_target_mv(void);      /* configured charge termination voltage, -1 if unknown */
+
+/* Battery % used by the watch: from the measured voltage on a single-cell LiPo curve. The PMIC
+ * gauge is only reported alongside, because its estimate depends on battery parameters that are
+ * not known to match this cell. -1 when there is no battery. */
+int axp_battery_percent(void);
+int axp_mv_to_percent(int mv);

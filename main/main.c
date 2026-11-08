@@ -15,6 +15,7 @@
 #include "esp_log.h"
 #include "bsp/esp-bsp.h"
 #include "axp.h"
+#include "battlog.h"
 #include "buttons.h"
 #include "controller.h"
 #include "faces.h"
@@ -87,6 +88,7 @@ void app_main(void)
         ESP_LOGE(TAG, "PMIC not available");
     } else {
         axp_configure_power_key();
+        battlog_sample("boot");
     }
     ESP_LOGI(TAG, "step: IMU");
     if (!imu_init(bus)) {

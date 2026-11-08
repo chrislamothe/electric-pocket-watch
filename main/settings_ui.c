@@ -28,6 +28,7 @@
 #include "esp_log.h"
 #include "esp_system.h"
 #include "axp.h"
+#include "battlog.h"
 #include "version.h"
 #include "bsp/esp-bsp.h"
 #include "faces.h"
@@ -620,21 +621,16 @@ static void build_display(void)
 static void build_system(void)
 {
     frame("System", 320);
-    char buf[96];
-    int pct = axp_battery_percent();
-    const char *src = axp_vbus_good() ? "USB power" : "on battery";
-    if (pct >= 0) {
-        snprintf(buf, sizeof(buf), "%s %s\nBattery %d%%, %s", WATCH_NAME, WATCH_VERSION, pct, src);
-    } else {
-        snprintf(buf, sizeof(buf), "%s %s\nBattery unknown, %s", WATCH_NAME, WATCH_VERSION, src);
-    }
+    char buf[256];
+    int o = snprintf(buf, sizeof(buf), "%s %s\n", WATCH_NAME, WATCH_VERSION);
+    battlog_summary(buf + o, sizeof(buf) - o);
     lv_obj_t *info = label(s_list, buf, &lv_font_montserrat_16, COL_TEXT);
     lv_obj_set_width(info, lv_pct(100));
     lv_label_set_long_mode(info, LV_LABEL_LONG_MODE_WRAP);
     item(s_list, "Restart", on_restart, NULL);
     item(s_list, "Factory reset", on_factory_reset, NULL);
     item(s_list, "Back", on_to_main, NULL);
-    set_status("Frozen? Hold PWR 6 s to power off, then press PWR.");
+    set_status("Frozen? Unplug USB, hold PWR 6 s to power off, then press PWR.");
 }
 
 static void build_cb(void *arg)

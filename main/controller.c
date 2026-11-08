@@ -10,6 +10,7 @@
 #include "bsp/esp-bsp.h"
 #include "esp_lv_adapter.h"
 #include "axp.h"
+#include "battlog.h"
 #include "buttons.h"
 #include "faces.h"
 #include "imu.h"
@@ -50,6 +51,8 @@ static void touch_activity(void)
 static void screen_on(const char *why)
 {
     int pct = axp_battery_percent();
+    ESP_LOGI(TAG, "battery %d mV, gauge %d%%, charge state %d", axp_battery_mv(), axp_gauge_percent(),
+             axp_charge_state());
     ESP_LOGI(TAG, "screen ON (%s), battery %d%%, VBUS %d, internal DMA free %u (largest %u)", why, pct,
              axp_vbus_good(), (unsigned)heap_caps_get_free_size(MALLOC_CAP_INTERNAL | MALLOC_CAP_DMA),
              (unsigned)heap_caps_get_largest_free_block(MALLOC_CAP_INTERNAL | MALLOC_CAP_DMA));
@@ -200,6 +203,7 @@ static wake_src_t wait_for_wake(void)
         gpio_wakeup_enable(PIN_PWR, GPIO_INTR_HIGH_LEVEL);
         gpio_wakeup_enable(PIN_IMU_INT1, s_imu_idle_level ? GPIO_INTR_LOW_LEVEL : GPIO_INTR_HIGH_LEVEL);
         esp_sleep_enable_gpio_wakeup();
+        esp_sleep_enable_timer_wakeup(battlog_us_until_due());    /* battery log sample */
         esp_err_t r = esp_light_sleep_start();
         gpio_wakeup_disable(PIN_BOOT);
         gpio_wakeup_disable(PIN_PWR);
@@ -212,7 +216,11 @@ static wake_src_t wait_for_wake(void)
             vTaskDelay(pdMS_TO_TICKS(10));
         }
     }
-    return wake_pins();
+    wake_src_t w = wake_pins();
+    if (w == WAKE_NONE && battlog_due()) {
+        battlog_sample(light ? "sleep" : "idle");
+    }
+    return w;
 }
 
 static void run_screen_off(void)
@@ -224,14 +232,17 @@ static void run_screen_off(void)
         case WAKE_BOOT:
         case WAKE_PWR:
             buttons_sync_and_consume();              /* this press only wakes the screen */
+            battlog_note_wake(BATTLOG_WAKE_BUTTON);
             screen_on(w == WAKE_BOOT ? "BOOT" : "PWR");
             break;
         case WAKE_IMU:
             ESP_LOGI(TAG, "motion wake");
             if (imu_confirm_double_tap(CONFIG_WATCH_TAP_WINDOW_MS, CONFIG_WATCH_TAP_THRESHOLD_MG)) {
                 buttons_sync_and_consume();
+                battlog_note_wake(BATTLOG_WAKE_TAP);
                 screen_on("double tap");
             } else {
+                battlog_note_wake(BATTLOG_WAKE_MOTION_REJECTED);
                 arm_for_sleep();
             }
             break;
