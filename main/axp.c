@@ -34,6 +34,9 @@ bool axp_init(i2c_master_bus_handle_t bus)
     if (rd(0x68, &v) && !(v & 0x01)) {
         i2c_reg_write(s_axp, 0x68, v | 0x01);              /* battery detection on */
     }
+    if (rd(0x24, &v) && (v & 0x07) != 4) {
+        i2c_reg_write(s_axp, 0x24, (uint8_t)((v & 0xF8) | 4)); /* power cut at 3.0 V (2600 + 100*4) */
+    }
     vTaskDelay(pdMS_TO_TICKS(20));                          /* first ADC conversion */
     ESP_LOGI(TAG, "battery %d mV (%d%% by voltage), gauge %d%%, charge state %d, charge target %d mV, power cut %d mV",
              axp_battery_mv(), axp_battery_percent(), axp_gauge_percent(), axp_charge_state(),

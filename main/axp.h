@@ -11,6 +11,7 @@
  *   0x30 ADC channel enable: bit0 battery voltage
  *   0x34/0x35 battery voltage, 13 bits ((0x34 & 0x1F) << 8 | 0x35), mV
  *   0x64 charge target voltage: bits[2:0] 1=4.0 2=4.1 3=4.2 4=4.35 5=4.4 V
+ *   0x24 bits[2:0] VOFF: power cut at 2600 + 100*n mV (set to 3.0 V at init to spare the cell)
  *   0x68 bit0 battery detection enable
  *   0xA4 fuel-gauge percentage (depends on battery parameters loaded in the PMIC)
  */

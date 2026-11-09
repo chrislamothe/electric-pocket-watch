@@ -137,8 +137,11 @@ static void run_screen_on(void)
                 idle = lv_display_get_inactive_time(NULL);
                 bsp_display_unlock();
             }
+            if (battlog_due()) {
+                battlog_sample("awake");             /* keeps logging with the screen always on */
+            }
             uint32_t limit = settings_ui_is_open() ? 60000 : s_awake_ms;   /* longer while in Settings */
-            if (idle >= limit) {
+            if (s_awake_ms > 0 && idle >= limit) {
                 screen_off("timeout");
                 return;
             }

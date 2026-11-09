@@ -80,7 +80,7 @@ static char s_sel_ssid[33];
 static char s_note[64];             /* one-shot message for the next page build */
 static bool s_reset_armed;          /* factory reset needs a second tap */
 
-static const int AWAKE_CHOICES[] = {5, 10, 20, 30};
+static const int AWAKE_CHOICES[] = {5, 10, 20, 30, 0};   /* 0 = always on */
 #define AWAKE_COUNT ((int)(sizeof(AWAKE_CHOICES) / sizeof(AWAKE_CHOICES[0])))
 
 static void go(page_t page);
@@ -619,7 +619,12 @@ static void build_display(void)
     lv_obj_add_event_cb(sl, on_brightness, LV_EVENT_RELEASED, NULL);
 
     char txt[32];
-    snprintf(txt, sizeof(txt), "Screen on: %d s", settings_get_int("awake_s", CONFIG_WATCH_AWAKE_MS / 1000));
+    int awake = settings_get_int("awake_s", CONFIG_WATCH_AWAKE_MS / 1000);
+    if (awake > 0) {
+        snprintf(txt, sizeof(txt), "Screen on: %d s", awake);
+    } else {
+        snprintf(txt, sizeof(txt), "Screen on: always");
+    }
     item(s_list, txt, on_awake, NULL);
     snprintf(txt, sizeof(txt), "Battery: %s", settings_get_int("batt_ring", 1) ? "On" : "Off");
     item(s_list, txt, on_batt_ring, NULL);
