@@ -50,7 +50,8 @@ static void touch_activity(void)
 
 static void screen_on(const char *why)
 {
-    int pct = axp_battery_percent();
+    axp_rest_update();                                /* display still dark: light-load reading */
+    int pct = axp_rest_percent();
     ESP_LOGI(TAG, "battery %d mV, gauge %d%%, charge state %d", axp_battery_mv(), axp_gauge_percent(),
              axp_charge_state());
     ESP_LOGI(TAG, "screen ON (%s), battery %d%%, VBUS %d, internal DMA free %u (largest %u)", why, pct,

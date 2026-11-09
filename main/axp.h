@@ -32,4 +32,12 @@ int axp_shutdown_mv(void);           /* VOFF: system powers off below this (0x24
  * gauge is only reported alongside, because its estimate depends on battery parameters that are
  * not known to match this cell. -1 when there is no battery. */
 int axp_battery_percent(void);
+
+/* "At rest" reading: taken while the display is dark (on wake before the screen lights, and by the
+ * battery log while asleep). The AMOLED's current makes the cell voltage dip by an amount that
+ * depends on how bright the face is, so live readings differ between faces; the indicator uses
+ * this instead. Falls back to a live reading until the first rest sample exists. */
+void axp_rest_update(void);
+int axp_rest_mv(void);
+int axp_rest_percent(void);
 int axp_mv_to_percent(int mv);

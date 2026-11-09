@@ -70,7 +70,7 @@ static void batt_refresh(bool force)
         return;
     }
     s_batt_next_us = now + BATT_PERIOD_US;
-    int pct = axp_battery_percent();
+    int pct = axp_rest_percent();
     int lit = 0;
     if (settings_get_int("batt_ring", 1) && pct >= 0) {
         lit = (pct * BATT_SEGMENTS + 99) / 100;         /* any charge in a segment lights it */

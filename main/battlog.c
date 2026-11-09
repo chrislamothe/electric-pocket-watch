@@ -134,6 +134,9 @@ void battlog_sample(const char *why)
     gettimeofday(&tv, NULL);
     bool usb = axp_vbus_good();
     int mv = axp_battery_mv();
+    if (strcmp(why, "sleep") == 0 || strcmp(why, "idle") == 0) {
+        axp_rest_update();                      /* screen is off: light-load reading */
+    }
     rec_t r;
     memset(&r, 0, sizeof(r));
     r.seq = s_seq++;
@@ -251,13 +254,13 @@ static size_t describe(char *buf, size_t len, const char *what, const rec_t *a, 
 
 void battlog_summary(char *buf, size_t len)
 {
-    int mv = axp_battery_mv();
+    int mv = axp_rest_mv();
     int g = axp_gauge_percent();
     bool usb = axp_vbus_good();
     static const char *const CHG[] = {"idle", "charging", "discharging", "?"};
     size_t o = 0;
     if (mv > 0) {
-        o += snprintf(buf + o, len - o, "Battery %d.%02d V = %d%% (gauge %d%%)\n%s, %s\n", mv / 1000,
+        o += snprintf(buf + o, len - o, "Battery %d.%02d V at rest = %d%% (gauge %d%%)\n%s, %s\n", mv / 1000,
                       (mv % 1000) / 10, axp_mv_to_percent(mv), g, usb ? "USB power" : "on battery",
                       CHG[axp_charge_state() & 3]);
     } else {

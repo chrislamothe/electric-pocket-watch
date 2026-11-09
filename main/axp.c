@@ -147,3 +147,24 @@ void axp_configure_power_key(void)
     i2c_reg_read(s_axp, 0x27, &lvl, 1);
     ESP_LOGI(TAG, "power key: 0x22=%02X 0x27=%02X (hold PWR %d s to power off)", en, lvl, 4 + 2 * ((lvl >> 2) & 3));
 }
+
+static int s_rest_mv = -1;
+
+void axp_rest_update(void)
+{
+    int mv = axp_battery_mv();
+    if (mv > 0) {
+        s_rest_mv = mv;
+    }
+}
+
+int axp_rest_mv(void)
+{
+    return s_rest_mv > 0 ? s_rest_mv : axp_battery_mv();
+}
+
+int axp_rest_percent(void)
+{
+    int mv = axp_rest_mv();
+    return mv > 0 ? axp_mv_to_percent(mv) : -1;
+}
