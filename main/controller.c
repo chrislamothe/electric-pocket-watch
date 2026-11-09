@@ -139,6 +139,9 @@ static void run_screen_on(void)
             }
             if (battlog_due()) {
                 battlog_sample("awake");             /* keeps logging with the screen always on */
+                if (s_awake_ms == 0) {
+                    axp_rest_update();               /* always on: no dark reading exists, use this one */
+                }
             }
             uint32_t limit = settings_ui_is_open() ? 60000 : s_awake_ms;   /* longer while in Settings */
             if (s_awake_ms > 0 && idle >= limit) {
