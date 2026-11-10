@@ -67,9 +67,10 @@ void splash_show(void)
     bool abnormal = (r == ESP_RST_PANIC || r == ESP_RST_INT_WDT || r == ESP_RST_TASK_WDT ||
                      r == ESP_RST_WDT || r == ESP_RST_BROWNOUT);
     text(s_splash, reset_text(r), &lv_font_montserrat_20, abnormal ? 0xD9734E : 0x7FB069, 74);
-    bsp_display_unlock();
-
+    /* Brightness goes over the same QSPI link as the pixels: send it under the lock, never in the
+     * middle of a flush from the LVGL task. */
     bsp_display_brightness_set(settings_get_int("bright", CONFIG_WATCH_BRIGHTNESS));
+    bsp_display_unlock();
     s_shown_us = esp_timer_get_time();
 }
 
@@ -102,6 +103,6 @@ void splash_message(const char *title, const char *detail)
     lv_obj_remove_flag(o, LV_OBJ_FLAG_SCROLLABLE);
     text(o, title, &lv_font_montserrat_36, 0xD9734E, -20);
     text(o, detail, &lv_font_montserrat_20, 0xA89F88, 30);
-    bsp_display_unlock();
     bsp_display_brightness_set(settings_get_int("bright", CONFIG_WATCH_BRIGHTNESS));
+    bsp_display_unlock();
 }

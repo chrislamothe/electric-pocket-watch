@@ -29,6 +29,8 @@ static uint32_t s_awake_ms = CONFIG_WATCH_AWAKE_MS;
 static bool s_lvgl_paused = false;
 static int s_imu_idle_level = 0;     /* INT1 level after arming; a change from it = motion */
 
+static void set_brightness(int pct);
+
 /* ---------------------------------------------------------------- empty battery */
 
 static void power_off_empty(int rest_mv)
@@ -41,7 +43,7 @@ static void power_off_empty(int rest_mv)
     }
     splash_message("Battery empty", "Charge to turn on");
     vTaskDelay(pdMS_TO_TICKS(3000));
-    bsp_display_brightness_set(0);
+    set_brightness(0);
     axp_power_off();
     vTaskDelay(pdMS_TO_TICKS(1000));
     /* Still running: the PMIC ignored the command. Sleep until PWR rather than drain further. */
@@ -98,7 +100,13 @@ static void touch_activity(void)
 
 static void screen_on(const char *why)
 {
-    axp_rest_update();                                /* display still dark: light-load reading */
+    static bool s_booted;
+    if (s_booted) {
+        axp_rest_update();                            /* display still dark: light-load reading */
+    } else {
+        axp_rest_set_loaded(axp_battery_mv());        /* boot: splash already lit */
+        s_booted = true;
+    }
     check_empty(axp_rest_mv());
     int pct = axp_rest_percent();
     ESP_LOGI(TAG, "battery %d mV, gauge %d%%, charge state %d", axp_battery_mv(), axp_gauge_percent(),

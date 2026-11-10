@@ -141,6 +141,9 @@ main/
   settings_ui.c     on-watch Settings menu
   net.c             Wi-Fi join/scan, SNTP, open-network fallback
   improv.c          Improv Wi-Fi over USB serial (used by the install page)
+  battlog.c         battery log in its own flash partition, CSV export
+  display_dma.c     preallocated strip buffer for display transfers
+  splash.c          boot screen, "Battery empty" message
   imu.c axp.c buttons.c settings.c watch_time.c i2c_dev.c
   fonts/            Abril Fatface digits for the railroad dials (generated with lv_font_conv)
 site/               ESP Web Tools install page and manifest
@@ -163,8 +166,11 @@ tools/wifi.py       command-line Improv client, for debugging
   PWR high, IMU on change).
 - **Display memory**: Waveshare's BSP streams the PSRAM draw buffers to the panel through
   ~46 KB internal-RAM bounce buffers. Wi-Fi/lwIP buffers are moved to PSRAM and 128 KB of internal
-  RAM is reserved, so those allocations keep succeeding. The Wi-Fi driver is also unloaded after
-  every sync or scan to give that memory back.
+  RAM is reserved. The SPI driver used to allocate a fresh internal-RAM copy for every strip;
+  when that failed the strip was dropped and the panel kept stale pixels (ghosts, wrong battery
+  segments). Since v0.8.5 the watch allocates one strip buffer at boot and copies each strip into
+  it through the adapter's draw-bitmap callback (`main/display_dma.c`), so no allocation happens
+  per frame. The Wi-Fi driver is also unloaded after every sync or scan.
 
 ## Status and known limits
 

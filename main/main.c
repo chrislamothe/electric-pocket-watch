@@ -18,6 +18,7 @@
 #include "battlog.h"
 #include "buttons.h"
 #include "controller.h"
+#include "display_dma.h"
 #include "faces.h"
 #include "imu.h"
 #include "improv.h"
@@ -80,6 +81,7 @@ void app_main(void)
         ESP_LOGE(TAG, "bsp_display_start failed");
         return;
     }
+    display_dma_init(disp);                     /* before anything else takes internal RAM */
     splash_show();                              /* name, version, reset reason */
 
     i2c_master_bus_handle_t bus = bsp_i2c_get_handle();

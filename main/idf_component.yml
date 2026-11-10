@@ -1,6 +1,8 @@
 dependencies:
   idf: ">=5.5.0"
   waveshare/esp32_s3_touch_amoled_1_75c: "3.0.0"
+  # Pinned to the version the display path was reviewed against (draw-bitmap callback API).
+  espressif/esp_lvgl_adapter: "0.6.4"
   # Same LVGL version as Waveshare's examples/esp-idf/02_lvgl_demo_v9 for this board.
   lvgl/lvgl:
     version: "9.5.0"

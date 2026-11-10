@@ -1,5 +1,6 @@
 #include "faces.h"
 
+#include <math.h>
 #include "esp_log.h"
 #include "esp_timer.h"
 #include "axp.h"
@@ -22,7 +23,11 @@ static int s_last_sec = -1;
  * Twelve segments at the edge of the glass, one per hour: 12-1 is the first, 11-12 the last, so a
  * full battery lights all twelve. Each segment is 1/12 of the charge (rounded up). When only the
  * 12-1 and 1-2 segments are left (<= 2/12, about 17 %), the lit segments turn red.
- * Read every 30 s and on every wake; drawn by one object with a custom draw callback. */
+ *
+ * One small object per segment, sized to that segment's bounding box, so a change redraws only
+ * the edge and not the whole screen. Every refresh (30 s, and on every wake) re-invalidates all
+ * twelve whether or not the level changed: if a display transfer was ever lost, the ring repairs
+ * itself instead of keeping stale segments. */
 #define BATT_SEGMENTS    12
 #define BATT_RED_AT      2
 #define BATT_W           6
@@ -30,39 +35,44 @@ static int s_last_sec = -1;
 #define COL_BATT_OK      0x6FB35A
 #define COL_BATT_LOW     0xD0342C
 #define BATT_PERIOD_US   (30LL * 1000 * 1000)
+#define BATT_HYST_PCT    2
 
-static lv_obj_t *s_batt;
+static lv_obj_t *s_seg[BATT_SEGMENTS];
 static int s_batt_lit = -1;
 static int64_t s_batt_next_us;
+static int s_batt_cx, s_batt_cy, s_batt_r;
 
-static void batt_draw_cb(lv_event_t *e)
+/* LVGL angles: 0 = 3 o'clock, clockwise; 12 o'clock = 270 */
+static void seg_angles(int i, int *start, int *end)
 {
-    if (s_batt_lit <= 0) {
-        return;
+    *start = (270 + i * 30 + BATT_GAP_DEG) % 360;
+    *end = (270 + (i + 1) * 30 - BATT_GAP_DEG) % 360;
+}
+
+static void seg_draw_cb(lv_event_t *e)
+{
+    int i = (int)(intptr_t)lv_event_get_user_data(e);
+    if (i >= s_batt_lit) {
+        return;                                         /* unlit: the face shows through */
     }
-    lv_layer_t *layer = lv_event_get_layer(e);
-    int32_t w = lv_display_get_horizontal_resolution(NULL);
+    int start, end;
+    seg_angles(i, &start, &end);
     lv_draw_arc_dsc_t d;
     lv_draw_arc_dsc_init(&d);
     d.color = lv_color_hex(s_batt_lit <= BATT_RED_AT ? COL_BATT_LOW : COL_BATT_OK);
     d.width = BATT_W;
-    d.center.x = w / 2;
-    d.center.y = w / 2;
-    d.radius = (uint16_t)(w / 2 - 2);
+    d.center.x = s_batt_cx;                             /* absolute: layers use screen coordinates */
+    d.center.y = s_batt_cy;
+    d.radius = (uint16_t)s_batt_r;
     d.rounded = 0;
-    for (int i = 0; i < s_batt_lit; i++) {
-        /* LVGL angles: 0 = 3 o'clock, clockwise; 12 o'clock = 270 */
-        int start = 270 + i * 30 + BATT_GAP_DEG;
-        int end = 270 + (i + 1) * 30 - BATT_GAP_DEG;
-        d.start_angle = (lv_value_precise_t)(start % 360);
-        d.end_angle = (lv_value_precise_t)(end % 360);
-        lv_draw_arc(layer, &d);
-    }
+    d.start_angle = (lv_value_precise_t)start;
+    d.end_angle = (lv_value_precise_t)end;
+    lv_draw_arc(lv_event_get_layer(e), &d);
 }
 
 static void batt_refresh(bool force)
 {
-    if (!s_batt) {
+    if (!s_seg[0]) {
         return;
     }
     int64_t now = esp_timer_get_time();
@@ -77,21 +87,63 @@ static void batt_refresh(bool force)
         if (lit > BATT_SEGMENTS) {
             lit = BATT_SEGMENTS;
         }
+        /* Hysteresis: drop a segment only once the charge is BATT_HYST_PCT below that segment's
+         * threshold, so a reading that wobbles across it (load recovery, ADC noise) cannot make
+         * the count differ from one wake or face to the next. Rising (charging) is immediate. */
+        if (s_batt_lit > 0 && lit == s_batt_lit - 1 &&
+            pct * BATT_SEGMENTS + BATT_HYST_PCT * BATT_SEGMENTS > (s_batt_lit - 1) * 100) {
+            lit = s_batt_lit;
+        }
     }
     if (lit != s_batt_lit) {
-        s_batt_lit = lit;
-        lv_obj_invalidate(s_batt);
+        ESP_LOGI(TAG, "battery indicator %d/12 (%d%%, %d mV at rest)", lit, pct, axp_rest_mv());
+    }
+    s_batt_lit = lit;
+    for (int i = 0; i < BATT_SEGMENTS; i++) {
+        lv_obj_invalidate(s_seg[i]);
+    }
+}
+
+static void batt_raise(void)
+{
+    for (int i = 0; i < BATT_SEGMENTS; i++) {
+        lv_obj_move_foreground(s_seg[i]);
     }
 }
 
 static void batt_create(void)
 {
-    s_batt = lv_obj_create(lv_screen_active());
-    lv_obj_remove_style_all(s_batt);
-    lv_obj_remove_flag(s_batt, LV_OBJ_FLAG_CLICKABLE | LV_OBJ_FLAG_SCROLLABLE);   /* touches go to the face */
-    lv_obj_set_size(s_batt, lv_display_get_horizontal_resolution(NULL), lv_display_get_vertical_resolution(NULL));
-    lv_obj_set_pos(s_batt, 0, 0);
-    lv_obj_add_event_cb(s_batt, batt_draw_cb, LV_EVENT_DRAW_MAIN, NULL);
+    int w = lv_display_get_horizontal_resolution(NULL);
+    s_batt_cx = w / 2;
+    s_batt_cy = lv_display_get_vertical_resolution(NULL) / 2;
+    s_batt_r = w / 2 - 2;
+    for (int i = 0; i < BATT_SEGMENTS; i++) {
+        /* bounding box of the segment: sample both edges along the arc */
+        int start, end;
+        seg_angles(i, &start, &end);
+        if (end < start) {
+            end += 360;
+        }
+        float minx = 1e9f, miny = 1e9f, maxx = -1e9f, maxy = -1e9f;
+        for (int a = start; a <= end; a++) {
+            float rad = a * (float)M_PI / 180.0f;
+            for (int k = 0; k < 2; k++) {
+                float r = k ? s_batt_r : s_batt_r - BATT_W;
+                float x = s_batt_cx + r * cosf(rad), y = s_batt_cy + r * sinf(rad);
+                minx = fminf(minx, x);
+                maxx = fmaxf(maxx, x);
+                miny = fminf(miny, y);
+                maxy = fmaxf(maxy, y);
+            }
+        }
+        lv_obj_t *o = lv_obj_create(lv_screen_active());
+        lv_obj_remove_style_all(o);
+        lv_obj_remove_flag(o, LV_OBJ_FLAG_CLICKABLE | LV_OBJ_FLAG_SCROLLABLE);   /* touches go to the face */
+        lv_obj_set_pos(o, (int)minx - 2, (int)miny - 2);
+        lv_obj_set_size(o, (int)(maxx - minx) + 5, (int)(maxy - miny) + 5);
+        lv_obj_add_event_cb(o, seg_draw_cb, LV_EVENT_DRAW_MAIN, (void *)(intptr_t)i);
+        s_seg[i] = o;
+    }
     batt_refresh(true);
 }
 
@@ -129,8 +181,8 @@ static void build_current(void)
     lv_obj_add_event_cb(s_root, gesture_cb, LV_EVENT_GESTURE, NULL);
     ESP_LOGI(TAG, "face '%s'", s_faces[s_index]->name);
     tick(true);
-    if (s_batt) {
-        lv_obj_move_foreground(s_batt);
+    if (s_seg[0]) {
+        batt_raise();
     }
     if (s_status) {
         lv_obj_move_foreground(s_status);

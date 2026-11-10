@@ -64,13 +64,37 @@ static bool battery_present(void)
     return rd(AXP_REG_STATUS1, &st) && (st & 0x08);
 }
 
-int axp_battery_mv(void)
+/* 0x34 (high 5 bits) and 0x35 (low 8 bits) are separate registers. Read on their own, the high byte
+ * of one conversion can pair with the low byte of the next: a value crossing a 256 mV boundary
+ * (3.584, 3.840, 4.096 V) then reads up to 256 mV off, several indicator segments. Read
+ * high-low-high and redo the low byte if the high byte moved. (Not a burst read: register
+ * auto-increment is not documented for this PMIC.) */
+static int vbat_once(void)
 {
-    uint8_t h = 0, l = 0;
-    if (!battery_present() || !rd(0x34, &h) || !rd(0x35, &l)) {
+    uint8_t h1 = 0, l = 0, h2 = 0;
+    if (!rd(0x34, &h1) || !rd(0x35, &l) || !rd(0x34, &h2)) {
         return -1;
     }
-    return ((h & 0x1F) << 8) | l;
+    if ((h1 & 0x1F) != (h2 & 0x1F) && !rd(0x35, &l)) {
+        return -1;
+    }
+    return ((h2 & 0x1F) << 8) | l;
+}
+
+int axp_battery_mv(void)
+{
+    if (!battery_present()) {
+        return -1;
+    }
+    int v[3];
+    for (int i = 0; i < 3; i++) {                           /* median of three: drops one outlier */
+        v[i] = vbat_once();
+        if (v[i] < 0) {
+            return -1;
+        }
+    }
+    int lo = v[0] < v[1] ? v[0] : v[1], hi = v[0] < v[1] ? v[1] : v[0];
+    return v[2] < lo ? lo : (v[2] > hi ? hi : v[2]);
 }
 
 int axp_gauge_percent(void)
