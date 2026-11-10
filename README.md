@@ -87,8 +87,8 @@ useful for checking the display or measuring screen power.
   - **Set time now**
   - **Use open Wi-Fi**: on by default.
   - **Forget network**
-- **Display**: brightness slider (5–100 %), screen-on time (5 / 10 / 20 / 30 s), battery indicator
-  on/off.
+- **Display**: brightness slider (5–100 %), screen-on time (5 / 10 / 20 / 30 s / always), battery
+  indicator on/off.
 - **System**: version, battery, **Restart**, **Factory reset** (tap twice).
 
 Wi-Fi can also be changed from the install page: **Connect watch → Change Wi-Fi**.
@@ -163,11 +163,19 @@ tools/wifi.py       command-line Improv client, for debugging
   PWR high, IMU on change).
 - **Display memory**: Waveshare's BSP streams the PSRAM draw buffers to the panel through
   ~46 KB internal-RAM bounce buffers. Wi-Fi/lwIP buffers are moved to PSRAM and 128 KB of internal
-  RAM is reserved, so those allocations keep succeeding.
+  RAM is reserved, so those allocations keep succeeding. The Wi-Fi driver is also unloaded after
+  every sync or scan to give that memory back.
 
 ## Status and known limits
 
-- Not yet measured: sleep current, real battery life, clock drift between syncs.
+- **Battery** (measured, v0.8.3): about 6 h with the screen always on, about 46 h from full with
+  the screen off. Charging from 20 % takes about 1 h 45 min. The percentage comes from a
+  voltage curve measured on this cell. Below 3.35 V the watch shows "Battery empty" and powers
+  itself off; USB or the PWR key turns it on again. The screen-off drain is still about 14 % of the
+  screen-on drain, far above what light sleep should cost: work in progress.
+- **Battery log**: Settings > System > Send log over USB prints the log as CSV (one record per
+  15 min, every 2 min below 3.5 V, with reset and power-off reasons at each boot).
+- Not yet measured: clock drift between syncs.
 - Double-tap sensitivity is a first tuning.
 - Planned: hinged-lid opening animation, time-zone setting, alarm with chime.
 

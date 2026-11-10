@@ -6,3 +6,7 @@
 
 void splash_show(void);   /* call right after the display starts; takes the LVGL lock */
 void splash_hide(void);   /* waits out SPLASH_MIN_MS, then removes it; takes the LVGL lock */
+
+/* Full-screen message on the top layer (e.g. "Battery empty"); lights the screen. Takes the LVGL
+ * lock, so LVGL must be running. */
+void splash_message(const char *title, const char *detail);

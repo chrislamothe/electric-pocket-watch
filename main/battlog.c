@@ -5,12 +5,14 @@
 #include <sys/time.h>
 #include "esp_log.h"
 #include "esp_partition.h"
+#include "esp_system.h"
 #include "esp_timer.h"
 #include "axp.h"
 
 static const char *TAG = "battlog";
 
 #define PERIOD_US    ((int64_t)BATTLOG_PERIOD_MIN * 60 * 1000000)
+#define LOW_PERIOD_US ((int64_t)BATTLOG_LOW_PERIOD_MIN * 60 * 1000000)
 #define REC_SIZE     32
 #define SECTOR       4096
 #define VALID_EPOCH  1704067200u                /* 2024-01-01: anything earlier is an unset clock */
@@ -28,9 +30,24 @@ typedef struct __attribute__((packed)) {
     uint8_t flags;                              /* bit0 USB, bits[3:1] charge state */
     uint16_t wakes_button, wakes_tap, wakes_motion;
     uint8_t magic[4];                           /* "PWBL": rejects leftover factory/garbage data */
-    uint8_t pad[4];
+    uint8_t why;                                /* WHY_*; 0 in records written before v0.8.4 */
+    uint8_t reset;                              /* boot records: esp_reset_reason() */
+    uint8_t pon, poff;                          /* boot records: PMIC power-on / power-off source */
 } rec_t;
 _Static_assert(sizeof(rec_t) == REC_SIZE, "record size");
+
+enum { WHY_UNKNOWN, WHY_BOOT, WHY_SLEEP, WHY_IDLE, WHY_AWAKE, WHY_EMPTY };
+static const char *const WHY_NAME[] = {"", "boot", "sleep", "idle", "awake", "empty"};
+
+static uint8_t why_code(const char *why)
+{
+    for (uint8_t i = 1; i < sizeof(WHY_NAME) / sizeof(WHY_NAME[0]); i++) {
+        if (strcmp(why, WHY_NAME[i]) == 0) {
+            return i;
+        }
+    }
+    return WHY_UNKNOWN;
+}
 
 static bool valid(const rec_t *r)
 {
@@ -41,6 +58,7 @@ static const esp_partition_t *s_part;
 static uint32_t s_slots, s_head, s_seq;         /* next slot to write, next sequence number */
 static uint16_t s_boot;
 static int64_t s_last_us = -PERIOD_US;
+static int64_t s_period_us = PERIOD_US;
 static uint16_t s_wakes[3];
 
 /* ---------------------------------------------------------------- storage */
@@ -117,12 +135,12 @@ void battlog_note_wake(battlog_wake_t w)
 
 bool battlog_due(void)
 {
-    return esp_timer_get_time() - s_last_us >= PERIOD_US;
+    return esp_timer_get_time() - s_last_us >= s_period_us;
 }
 
 uint64_t battlog_us_until_due(void)
 {
-    int64_t left = PERIOD_US - (esp_timer_get_time() - s_last_us);
+    int64_t left = s_period_us - (esp_timer_get_time() - s_last_us);
     return left > 1000000 ? (uint64_t)left : 1000000;
 }
 
@@ -150,7 +168,18 @@ void battlog_sample(const char *why)
     r.wakes_button = s_wakes[0];
     r.wakes_tap = s_wakes[1];
     r.wakes_motion = s_wakes[2];
+    r.why = why_code(why);
+    if (r.why == WHY_BOOT) {
+        int pon = axp_power_on_source(), poff = axp_power_off_source();
+        r.reset = (uint8_t)esp_reset_reason();
+        r.pon = pon >= 0 ? (uint8_t)pon : 0xFF;
+        r.poff = poff >= 0 ? (uint8_t)poff : 0xFF;
+        ESP_LOGI(TAG, "reset reason %u, PMIC power-on source 0x%02X, last power-off source 0x%02X", r.reset,
+                 r.pon, r.poff);
+    }
     append(&r);
+    /* Sample the end of a discharge closely: the last stretch goes fast. */
+    s_period_us = (!usb && mv > 0 && mv < BATTLOG_LOW_MV) ? LOW_PERIOD_US : PERIOD_US;
     ESP_LOGI(TAG, "[%s] #%lu boot %u battery %d mV (%d%%), gauge %d%%, %s, wakes %u/%u/%u", why,
              (unsigned long)r.seq, r.boot, mv, axp_mv_to_percent(mv), r.gauge, usb ? "USB" : "battery",
              r.wakes_button, r.wakes_tap, r.wakes_motion);
@@ -161,14 +190,17 @@ void battlog_sample(const char *why)
 static void dump_one(const rec_t *r, void *ctx)
 {
     (void)ctx;
-    printf("BATTLOG,%lu,%u,%lu,%lu,%u,%d,%u,%u,%u,%u,%u\n", (unsigned long)r->seq, r->boot,
-           (unsigned long)r->epoch, (unsigned long)r->uptime_s, r->mv, r->gauge, r->flags & FLAG_USB,
-           (r->flags >> 1) & 3, r->wakes_button, r->wakes_tap, r->wakes_motion);
+    printf("BATTLOG,%lu,%u,%lu,%lu,%u,%d,%u,%u,%u,%u,%u,%s,%u,0x%02X,0x%02X\n", (unsigned long)r->seq,
+           r->boot, (unsigned long)r->epoch, (unsigned long)r->uptime_s, r->mv, r->gauge,
+           r->flags & FLAG_USB, (r->flags >> 1) & 3, r->wakes_button, r->wakes_tap, r->wakes_motion,
+           r->why < sizeof(WHY_NAME) / sizeof(WHY_NAME[0]) ? WHY_NAME[r->why] : "?", r->reset, r->pon,
+           r->poff);
 }
 
 void battlog_dump(void)
 {
-    printf("BATTLOG,seq,boot,epoch,uptime_s,mv,gauge,usb,charge,wakes_button,wakes_tap,wakes_motion\n");
+    printf("BATTLOG,seq,boot,epoch,uptime_s,mv,gauge,usb,charge,wakes_button,wakes_tap,wakes_motion,"
+           "why,reset,pon,poff\n");
     for_each(dump_one, NULL);
     printf("BATTLOG,end,shutdown_mv=%d,charge_target_mv=%d\n", axp_shutdown_mv(), axp_charge_target_mv());
     fflush(stdout);
@@ -275,7 +307,8 @@ void battlog_summary(char *buf, size_t len)
         o += describe(buf + o, len - o, "Last run", &t.done_start, &t.done_end);
     }
     if (o < len) {
-        snprintf(buf + o, len - o, "Wakes this boot: %u button, %u tap, %u motion only\nPower cut at %d mV",
-                 s_wakes[0], s_wakes[1], s_wakes[2], axp_shutdown_mv());
+        snprintf(buf + o, len - o,
+                 "Wakes this boot: %u button, %u tap, %u motion only\nShuts down at %d mV (power cut %d mV)",
+                 s_wakes[0], s_wakes[1], s_wakes[2], BATTLOG_EMPTY_MV, axp_shutdown_mv());
     }
 }

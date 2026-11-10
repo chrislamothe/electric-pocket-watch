@@ -12,9 +12,13 @@
  * the screen is off.
  *
  * Export: Settings > System > "Send log over USB" prints every record as CSV lines starting
- * with "BATTLOG," on the USB serial console.
+ * with "BATTLOG," on the USB serial console. Boot records also carry the ESP32 reset reason and
+ * the PMIC's power-on / power-off source registers, so the log says how the last run ended.
  */
-#define BATTLOG_PERIOD_MIN 15
+#define BATTLOG_PERIOD_MIN     15
+#define BATTLOG_LOW_PERIOD_MIN 2      /* on battery below BATTLOG_LOW_MV */
+#define BATTLOG_LOW_MV         3500
+#define BATTLOG_EMPTY_MV       3350   /* screen-off reading at which the watch powers itself off */
 
 typedef enum { BATTLOG_WAKE_BUTTON, BATTLOG_WAKE_TAP, BATTLOG_WAKE_MOTION_REJECTED } battlog_wake_t;
 

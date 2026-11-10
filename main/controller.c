@@ -7,6 +7,7 @@
 #include "esp_heap_caps.h"
 #include "esp_log.h"
 #include "esp_sleep.h"
+#include "esp_system.h"
 #include "bsp/esp-bsp.h"
 #include "esp_lv_adapter.h"
 #include "axp.h"
@@ -17,6 +18,7 @@
 #include "net.h"
 #include "settings.h"
 #include "settings_ui.h"
+#include "splash.h"
 
 static const char *TAG = "ctl";
 
@@ -26,6 +28,52 @@ static bool s_screen_on = false;
 static uint32_t s_awake_ms = CONFIG_WATCH_AWAKE_MS;
 static bool s_lvgl_paused = false;
 static int s_imu_idle_level = 0;     /* INT1 level after arming; a change from it = motion */
+
+/* ---------------------------------------------------------------- empty battery */
+
+static void power_off_empty(int rest_mv)
+{
+    ESP_LOGW(TAG, "battery empty (%d mV at rest): powering off", rest_mv);
+    battlog_sample("empty");
+    if (s_lvgl_paused) {
+        esp_lv_adapter_resume();
+        s_lvgl_paused = false;
+    }
+    splash_message("Battery empty", "Charge to turn on");
+    vTaskDelay(pdMS_TO_TICKS(3000));
+    bsp_display_brightness_set(0);
+    axp_power_off();
+    vTaskDelay(pdMS_TO_TICKS(1000));
+    /* Still running: the PMIC ignored the command. Sleep until PWR rather than drain further. */
+    ESP_LOGE(TAG, "PMIC power-off failed; deep sleep until PWR");
+    esp_sleep_enable_ext0_wakeup(PIN_PWR, 1);
+    esp_deep_sleep_start();
+}
+
+/* rest_mv: a screen-off reading, or a screen-on one corrected by AXP_SCREEN_SAG_MV. */
+static void check_empty(int rest_mv)
+{
+    static int low;
+    if (rest_mv <= 0 || rest_mv > BATTLOG_EMPTY_MV || axp_vbus_good()) {
+        low = 0;
+        return;
+    }
+    if (++low >= 2) {
+        power_off_empty(rest_mv);
+    }
+}
+
+void controller_check_empty_at_boot(void)
+{
+    for (int i = 0; i < 2; i++) {                    /* splash is lit: screen-on readings */
+        int mv = axp_battery_mv();
+        if (axp_vbus_good() || mv <= 0 || mv + AXP_SCREEN_SAG_MV > BATTLOG_EMPTY_MV) {
+            return;
+        }
+        vTaskDelay(pdMS_TO_TICKS(200));
+    }
+    power_off_empty(axp_battery_mv() + AXP_SCREEN_SAG_MV);
+}
 
 /* ---------------------------------------------------------------- screen */
 
@@ -51,6 +99,7 @@ static void touch_activity(void)
 static void screen_on(const char *why)
 {
     axp_rest_update();                                /* display still dark: light-load reading */
+    check_empty(axp_rest_mv());
     int pct = axp_rest_percent();
     ESP_LOGI(TAG, "battery %d mV, gauge %d%%, charge state %d", axp_battery_mv(), axp_gauge_percent(),
              axp_charge_state());
@@ -140,7 +189,8 @@ static void run_screen_on(void)
             if (battlog_due()) {
                 battlog_sample("awake");             /* keeps logging with the screen always on */
                 if (s_awake_ms == 0) {
-                    axp_rest_update();               /* always on: no dark reading exists, use this one */
+                    axp_rest_set_loaded(axp_battery_mv());   /* always on: no dark reading exists */
+                    check_empty(axp_rest_mv());
                 }
             }
             uint32_t limit = settings_ui_is_open() ? 60000 : s_awake_ms;   /* longer while in Settings */
@@ -226,6 +276,7 @@ static wake_src_t wait_for_wake(void)
     wake_src_t w = wake_pins();
     if (w == WAKE_NONE && battlog_due()) {
         battlog_sample(light ? "sleep" : "idle");
+        check_empty(axp_rest_mv());
     }
     return w;
 }

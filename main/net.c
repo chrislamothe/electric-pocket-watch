@@ -7,6 +7,7 @@
 #include "freertos/event_groups.h"
 #include "freertos/semphr.h"
 #include "esp_event.h"
+#include "esp_heap_caps.h"
 #include "esp_log.h"
 #include "esp_netif.h"
 #include "esp_netif_sntp.h"
@@ -25,7 +26,9 @@ static const char *TAG = "net";
 
 static SemaphoreHandle_t s_lock;
 static EventGroupHandle_t s_ev;
-static bool s_inited;
+static bool s_base_inited;           /* netif layer, event loop, our handlers: once */
+static bool s_inited;                /* Wi-Fi driver + STA netif: only while a job runs */
+static esp_netif_t *s_netif;
 static volatile bool s_want_connect;
 static int s_retries;
 static net_status_t s_st;
@@ -92,33 +95,77 @@ static void on_event(void *arg, esp_event_base_t base, int32_t id, void *data)
     }
 }
 
+static void log_dma(const char *when)
+{
+    ESP_LOGI(TAG, "%s: internal DMA free %u (largest %u)", when,
+             (unsigned)heap_caps_get_free_size(MALLOC_CAP_INTERNAL | MALLOC_CAP_DMA),
+             (unsigned)heap_caps_get_largest_free_block(MALLOC_CAP_INTERNAL | MALLOC_CAP_DMA));
+}
+
+/* The Wi-Fi driver holds internal RAM (buffers, task stack) that the display's DMA bounce buffers
+ * also need, so it is loaded for each job and unloaded afterwards (wifi_release). */
 static bool ensure_init(void)
 {
     if (s_inited) {
         return true;
     }
-    esp_err_t e = esp_netif_init();
-    if (e == ESP_OK) {
-        e = esp_event_loop_create_default();
-        if (e == ESP_ERR_INVALID_STATE) {
-            e = ESP_OK;                                 /* already created */
+    esp_err_t e = ESP_OK;
+    if (!s_base_inited) {
+        e = esp_netif_init();
+        if (e == ESP_OK) {
+            e = esp_event_loop_create_default();
+            if (e == ESP_ERR_INVALID_STATE) {
+                e = ESP_OK;                             /* already created */
+            }
         }
+        if (e == ESP_OK) e = esp_event_handler_register(WIFI_EVENT, ESP_EVENT_ANY_ID, on_event, NULL);
+        if (e == ESP_OK) e = esp_event_handler_register(IP_EVENT, IP_EVENT_STA_GOT_IP, on_event, NULL);
+        if (e != ESP_OK) {
+            ESP_LOGE(TAG, "network stack init failed: %s", esp_err_to_name(e));
+            return false;
+        }
+        s_base_inited = true;
     }
-    if (e == ESP_OK && !esp_netif_create_default_wifi_sta()) {
-        e = ESP_FAIL;
+    log_dma("before Wi-Fi");
+    s_netif = esp_netif_create_default_wifi_sta();
+    if (!s_netif) {
+        ESP_LOGE(TAG, "Wi-Fi netif create failed");
+        return false;
     }
     wifi_init_config_t cfg = WIFI_INIT_CONFIG_DEFAULT();
-    if (e == ESP_OK) e = esp_wifi_init(&cfg);
-    if (e == ESP_OK) e = esp_wifi_set_storage(WIFI_STORAGE_RAM);
-    if (e == ESP_OK) e = esp_event_handler_register(WIFI_EVENT, ESP_EVENT_ANY_ID, on_event, NULL);
-    if (e == ESP_OK) e = esp_event_handler_register(IP_EVENT, IP_EVENT_STA_GOT_IP, on_event, NULL);
-    if (e == ESP_OK) e = esp_wifi_set_mode(WIFI_MODE_STA);
+    e = esp_wifi_init(&cfg);
+    if (e == ESP_OK) {
+        e = esp_wifi_set_storage(WIFI_STORAGE_RAM);
+        if (e == ESP_OK) e = esp_wifi_set_mode(WIFI_MODE_STA);
+        if (e != ESP_OK) {
+            esp_wifi_deinit();
+        }
+    }
     if (e != ESP_OK) {
         ESP_LOGE(TAG, "Wi-Fi init failed: %s", esp_err_to_name(e));
+        esp_netif_destroy_default_wifi(s_netif);
+        s_netif = NULL;
         return false;
     }
     s_inited = true;
     return true;
+}
+
+/* Unload the Wi-Fi driver and its netif. Call with s_lock held, at the end of each job. */
+static void wifi_release(void)
+{
+    s_want_connect = false;
+    if (!s_inited) {
+        return;
+    }
+    esp_wifi_stop();
+    vTaskDelay(pdMS_TO_TICKS(100));                 /* let the event loop drain stop events */
+    esp_wifi_deinit();
+    esp_netif_destroy_default_wifi(s_netif);
+    s_netif = NULL;
+    s_inited = false;
+    s_st.radio = NET_RADIO_OFF;
+    log_dma("Wi-Fi unloaded");
 }
 
 static bool wifi_join(const char *ssid, const char *pass, int timeout_ms)
@@ -265,6 +312,7 @@ net_result_t net_sync_time(void)
     if (r == NET_NOT_FOUND && !have_saved && !allow_open) {
         r = NET_NO_CREDENTIALS;
     }
+    wifi_release();
     record(r, used);
     ESP_LOGI(TAG, "time sync result: %s", net_result_text(r));
     xSemaphoreGive(s_lock);
@@ -283,6 +331,7 @@ net_result_t net_provision(const char *ssid, const char *pass)
         r = sync_ntp() ? NET_OK : NET_NTP_FAILED;
     }
     radio_off();
+    wifi_release();
     record(r, ssid);
     xSemaphoreGive(s_lock);
     return r;
@@ -337,6 +386,7 @@ int net_scan(net_ap_t *out, int max)
         return 0;
     }
     int count = scan_locked(out, max);
+    wifi_release();
     xSemaphoreGive(s_lock);
     return count;
 }

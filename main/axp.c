@@ -105,12 +105,14 @@ int axp_shutdown_mv(void)
     return rd(0x24, &v) ? 2600 + 100 * (v & 0x07) : -1;
 }
 
-/* Typical single-cell LiPo resting voltage vs state of charge (4.2 V full). Light-load readings,
- * which is what the watch sees most of the time; under load the voltage sags a little. */
+/* Screen-off (light-load) voltage vs charge, measured on this watch's cell (v0.8.3 battery log,
+ * 2026-11-09): a full always-on discharge at constant load gave charge vs time, and the screen-off
+ * readings of an earlier run matched that curve 35 mV higher (AXP_SCREEN_SAG_MV) to within 2 mV.
+ * 0 % is where the watch stopped under display load (3.29 V loaded). */
 int axp_mv_to_percent(int mv)
 {
-    static const int MV[]  = {3300, 3500, 3610, 3670, 3710, 3750, 3800, 3850, 3920, 4000, 4100, 4180};
-    static const int PCT[] = {   0,    5,   10,   20,   30,   40,   50,   60,   70,   80,   90,  100};
+    static const int MV[]  = {3320, 3490, 3574, 3632, 3692, 3776, 3858, 3928, 4000, 4068, 4150};
+    static const int PCT[] = {   0,   10,   20,   30,   40,   50,   60,   70,   80,   90,  100};
     const int n = sizeof(MV) / sizeof(MV[0]);
     if (mv <= MV[0]) {
         return 0;
@@ -161,6 +163,13 @@ void axp_rest_update(void)
     }
 }
 
+void axp_rest_set_loaded(int mv)
+{
+    if (mv > 0) {
+        s_rest_mv = mv + AXP_SCREEN_SAG_MV;
+    }
+}
+
 int axp_rest_mv(void)
 {
     return s_rest_mv > 0 ? s_rest_mv : axp_battery_mv();
@@ -170,4 +179,24 @@ int axp_rest_percent(void)
 {
     int mv = axp_rest_mv();
     return mv > 0 ? axp_mv_to_percent(mv) : -1;
+}
+
+int axp_power_on_source(void)
+{
+    uint8_t v = 0;
+    return rd(0x20, &v) ? v : -1;
+}
+
+int axp_power_off_source(void)
+{
+    uint8_t v = 0;
+    return rd(0x21, &v) ? v : -1;
+}
+
+void axp_power_off(void)
+{
+    uint8_t v = 0;
+    if (rd(0x10, &v)) {
+        i2c_reg_write(s_axp, 0x10, v | 0x01);              /* software power-off */
+    }
 }

@@ -88,3 +88,20 @@ void splash_hide(void)
         bsp_display_unlock();
     }
 }
+
+void splash_message(const char *title, const char *detail)
+{
+    if (bsp_display_lock(1000) != ESP_OK) {
+        return;
+    }
+    lv_obj_t *o = lv_obj_create(lv_layer_top());
+    lv_obj_remove_style_all(o);
+    lv_obj_set_size(o, lv_pct(100), lv_pct(100));
+    lv_obj_set_style_bg_opa(o, LV_OPA_COVER, 0);
+    lv_obj_set_style_bg_color(o, lv_color_black(), 0);
+    lv_obj_remove_flag(o, LV_OBJ_FLAG_SCROLLABLE);
+    text(o, title, &lv_font_montserrat_36, 0xD9734E, -20);
+    text(o, detail, &lv_font_montserrat_20, 0xA89F88, 30);
+    bsp_display_unlock();
+    bsp_display_brightness_set(settings_get_int("bright", CONFIG_WATCH_BRIGHTNESS));
+}

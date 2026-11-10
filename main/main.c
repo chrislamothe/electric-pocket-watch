@@ -90,6 +90,9 @@ void app_main(void)
         axp_configure_power_key();
         battlog_init();
         battlog_sample("boot");
+#if CONFIG_WATCH_STAGE == 2
+        controller_check_empty_at_boot();
+#endif
     }
     ESP_LOGI(TAG, "step: IMU");
     if (!imu_init(bus)) {

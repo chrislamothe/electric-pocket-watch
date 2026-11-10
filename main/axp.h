@@ -12,6 +12,10 @@
  *   0x34/0x35 battery voltage, 13 bits ((0x34 & 0x1F) << 8 | 0x35), mV
  *   0x64 charge target voltage: bits[2:0] 1=4.0 2=4.1 3=4.2 4=4.35 5=4.4 V
  *   0x24 bits[2:0] VOFF: power cut at 2600 + 100*n mV (set to 3.0 V at init to spare the cell)
+ *   0x10 bit0 software power-off
+ *   0x20 power-on source: bit0 PWR key, bit2 VBUS inserted, bit3 battery, bit4 battery inserted
+ *   0x21 power-off source: bit1 software, bit2 PWR held, bit3 VSYS under-voltage (VOFF),
+ *        bit4 VBUS over-voltage, bit5 DC-DC under-voltage, bit6 DC-DC over-voltage, bit7 over-temp
  *   0x68 bit0 battery detection enable
  *   0xA4 fuel-gauge percentage (depends on battery parameters loaded in the PMIC)
  */
@@ -38,7 +42,13 @@ int axp_battery_percent(void);
  * battery log while asleep). The AMOLED's current makes the cell voltage dip by an amount that
  * depends on how bright the face is, so live readings differ between faces; the indicator uses
  * this instead. Falls back to a live reading until the first rest sample exists. */
+#define AXP_SCREEN_SAG_MV 35         /* screen-on reading is this much below the screen-off one */
 void axp_rest_update(void);
+void axp_rest_set_loaded(int mv);    /* screen-on reading, corrected by AXP_SCREEN_SAG_MV */
 int axp_rest_mv(void);
 int axp_rest_percent(void);
 int axp_mv_to_percent(int mv);
+
+int axp_power_on_source(void);       /* raw 0x20, -1 on error */
+int axp_power_off_source(void);      /* raw 0x21, -1 on error */
+void axp_power_off(void);            /* PMIC turns every rail off; USB or the PWR key powers on again */
