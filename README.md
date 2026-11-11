@@ -189,6 +189,11 @@ tools/wifi.py       command-line Improv client, for debugging
 - Double-tap sensitivity is a first tuning.
 - Planned: hinged-lid opening animation, time-zone setting, alarm with chime.
 
+## License
+
+MIT, see [LICENSE](LICENSE). Third-party components keep their own licenses (below); the Abril
+Fatface font is under the SIL Open Font License.
+
 ## Credits and third-party licenses
 
 - [LVGL](https://lvgl.io) 9.5: MIT
