@@ -22,7 +22,11 @@ clock.
   10 s after the last touch (adjustable).
 - **Battery indicator**: twelve segments at the edge of the glass, one per hour. 12–1 is the first
   segment and 11–12 the last, so a full battery lights all twelve. When only 12–1 and 1–2 are left
-  (about 17 % or less) they turn red.
+  (about 17 % or less) they turn red. While charging the segments are blue; a full green ring means
+  charging is complete.
+- **Charging**: plugging in turns the screen on, and it stays on while USB power is connected. After
+  the normal screen-on time it dims to 20 %; a touch or button press brightens it again (the first
+  BOOT press only brightens). PWR turns it off as usual. Can be turned off in Display settings.
 - **Time sync over Wi-Fi**: the watch syncs once at power-on and whenever you ask. It uses your saved
   network, or an open network if allowed. Wi-Fi is off the rest of the time.
 - **Settings on the watch**: Wi-Fi setup with a network list and on-screen keyboard, live Wi-Fi
@@ -87,8 +91,8 @@ useful for checking the display or measuring screen power.
   - **Set time now**
   - **Use open Wi-Fi**: on by default.
   - **Forget network**
-- **Display**: brightness slider (5–100 %), screen-on time (5 / 10 / 20 / 30 s / always), battery
-  indicator on/off.
+- **Display**: brightness slider (5–100 %), screen-on time (5 / 10 / 20 / 30 s / always), on while
+  charging (default on), battery indicator on/off.
 - **System**: version, battery, **Restart**, **Factory reset** (tap twice).
 
 Wi-Fi can also be changed from the install page: **Connect watch → Change Wi-Fi**.

@@ -34,11 +34,13 @@ static int s_last_sec = -1;
 #define BATT_GAP_DEG     2
 #define COL_BATT_OK      0x6FB35A
 #define COL_BATT_LOW     0xD0342C
+#define COL_BATT_CHG     0x4FA3E0     /* charging */
 #define BATT_PERIOD_US   (30LL * 1000 * 1000)
 #define BATT_HYST_PCT    2
 
 static lv_obj_t *s_seg[BATT_SEGMENTS];
 static int s_batt_lit = -1;
+static bool s_batt_chg;              /* on USB and still charging */
 static int64_t s_batt_next_us;
 static int s_batt_cx, s_batt_cy, s_batt_r;
 
@@ -59,7 +61,7 @@ static void seg_draw_cb(lv_event_t *e)
     seg_angles(i, &start, &end);
     lv_draw_arc_dsc_t d;
     lv_draw_arc_dsc_init(&d);
-    d.color = lv_color_hex(s_batt_lit <= BATT_RED_AT ? COL_BATT_LOW : COL_BATT_OK);
+    d.color = lv_color_hex(s_batt_chg ? COL_BATT_CHG : s_batt_lit <= BATT_RED_AT ? COL_BATT_LOW : COL_BATT_OK);
     d.width = BATT_W;
     d.center.x = s_batt_cx;                             /* absolute: layers use screen coordinates */
     d.center.y = s_batt_cy;
@@ -80,7 +82,18 @@ static void batt_refresh(bool force)
         return;
     }
     s_batt_next_us = now + BATT_PERIOD_US;
+    /* On USB the board runs from VBUS, so a live reading is fine (it reads high while charging:
+     * the charger raises the cell voltage). "Charge complete" from the PMIC shows a full ring. */
+    bool usb = axp_vbus_good();
+    axp_charge_t cs = usb ? axp_charge_state() : AXP_CHG_DISCHARGING;
+    if (usb) {
+        axp_rest_update();
+    }
+    s_batt_chg = usb && cs == AXP_CHG_CHARGING;
     int pct = axp_rest_percent();
+    if (usb && cs == AXP_CHG_STANDBY && pct >= 0) {
+        pct = 100;
+    }
     int lit = 0;
     if (settings_get_int("batt_ring", 1) && pct >= 0) {
         lit = (pct * BATT_SEGMENTS + 99) / 100;         /* any charge in a segment lights it */
@@ -96,7 +109,8 @@ static void batt_refresh(bool force)
         }
     }
     if (lit != s_batt_lit) {
-        ESP_LOGI(TAG, "battery indicator %d/12 (%d%%, %d mV at rest)", lit, pct, axp_rest_mv());
+        ESP_LOGI(TAG, "battery indicator %d/12 (%d%%, %d mV at rest%s)", lit, pct, axp_rest_mv(),
+                 s_batt_chg ? ", charging" : "");
     }
     s_batt_lit = lit;
     for (int i = 0; i < BATT_SEGMENTS; i++) {
@@ -310,4 +324,13 @@ void faces_show_status(const char *text, int hide_after_ms)
 void faces_battery_ring_changed_nolock(void)
 {
     batt_refresh(true);
+}
+
+void faces_battery_refresh(void)
+{
+    if (bsp_display_lock(1000) != ESP_OK) {
+        return;
+    }
+    batt_refresh(true);
+    bsp_display_unlock();
 }

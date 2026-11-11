@@ -29,6 +29,15 @@ static uint32_t s_awake_ms = CONFIG_WATCH_AWAKE_MS;
 static bool s_lvgl_paused = false;
 static int s_imu_idle_level = 0;     /* INT1 level after arming; a change from it = motion */
 
+/* While charging (setting "chg_on", default on) the screen does not time out: after the normal
+ * screen-on time it dims to CHARGE_DIM_PCT and stays on; a touch or button brings it back to full
+ * brightness. Plugging in also turns the screen on. PWR still turns it off. */
+#define CHARGE_DIM_PCT 20
+static bool s_vbus;                  /* USB power, as last seen */
+static bool s_chg_on = true;         /* setting, re-read periodically while the screen is on */
+static bool s_dimmed;                /* dimmed by the charging rule */
+static int s_bright = CONFIG_WATCH_BRIGHTNESS;
+
 static void set_brightness(int pct);
 
 /* ---------------------------------------------------------------- empty battery */
@@ -121,7 +130,10 @@ static void screen_on(const char *why)
     }
     faces_set_active(true);                          /* draws the current time first */
     vTaskDelay(pdMS_TO_TICKS(60));                   /* let that frame reach the panel */
-    set_brightness(settings_get_int("bright", CONFIG_WATCH_BRIGHTNESS));
+    s_bright = settings_get_int("bright", CONFIG_WATCH_BRIGHTNESS);
+    set_brightness(s_bright);
+    s_dimmed = false;
+    s_chg_on = settings_get_int("chg_on", 1) != 0;
     s_awake_ms = (uint32_t)settings_get_int("awake_s", CONFIG_WATCH_AWAKE_MS / 1000) * 1000;
     touch_activity();
     s_screen_on = true;
@@ -143,6 +155,39 @@ static void screen_off(const char *why)
     s_screen_on = false;
 }
 
+/* ---------------------------------------------------------------- USB power */
+
+/* Returns true when USB power has just been connected. */
+static bool vbus_poll(void)
+{
+    bool usb = axp_vbus_good();
+    if (usb == s_vbus) {
+        return false;
+    }
+    s_vbus = usb;
+    ESP_LOGI(TAG, "USB power %s", usb ? "connected" : "removed");
+    if (!usb) {
+        /* The last reading was the elevated charging voltage: replace it now. */
+        if (s_screen_on && s_bright > 0) {
+            axp_rest_set_loaded(axp_battery_mv());
+        } else {
+            axp_rest_update();
+        }
+    }
+    if (s_screen_on) {
+        faces_battery_refresh();
+    }
+    return usb;
+}
+
+static void restore_from_dim(void)
+{
+    if (s_dimmed) {
+        set_brightness(s_bright);
+        s_dimmed = false;
+    }
+}
+
 /* ---------------------------------------------------------------- screen-on loop */
 
 static void run_screen_on(void)
@@ -151,7 +196,10 @@ static void run_screen_on(void)
     while (s_screen_on) {
         switch (buttons_poll()) {
         case BTN_BOOT_SHORT:
-            if (settings_ui_is_open()) {
+            if (s_dimmed) {
+                ESP_LOGI(TAG, "BOOT short: undim");      /* first press only brightens */
+                restore_from_dim();
+            } else if (settings_ui_is_open()) {
                 ESP_LOGI(TAG, "BOOT short: close settings");
                 settings_ui_close();
             } else {
@@ -201,8 +249,28 @@ static void run_screen_on(void)
                     check_empty(axp_rest_mv());
                 }
             }
+            if (((n / 20) % 25) == 0) {
+                s_chg_on = settings_get_int("chg_on", 1) != 0;   /* every ~5 s: follows the setting */
+            }
+            bool was_usb = s_vbus;
+            vbus_poll();
+            if (s_vbus != was_usb) {
+                touch_activity();                    /* plugged or unplugged: restart the timer */
+                restore_from_dim();
+                idle = 0;
+            }
             uint32_t limit = settings_ui_is_open() ? 60000 : s_awake_ms;   /* longer while in Settings */
-            if (s_awake_ms > 0 && idle >= limit) {
+            bool timed_out = s_awake_ms > 0 && idle >= limit;
+            if (s_vbus && s_chg_on) {
+                if (timed_out && !s_dimmed) {
+                    ESP_LOGI(TAG, "charging: screen dimmed");
+                    set_brightness(s_bright < CHARGE_DIM_PCT ? s_bright : CHARGE_DIM_PCT);
+                    s_dimmed = true;
+                } else if (!timed_out && s_dimmed) {
+                    restore_from_dim();              /* touched */
+                }
+            } else if (timed_out) {
+                restore_from_dim();
                 screen_off("timeout");
                 return;
             }
@@ -294,6 +362,11 @@ static void run_screen_off(void)
     arm_for_sleep();
     while (!s_screen_on) {
         wake_src_t w = wait_for_wake();
+        if (vbus_poll() && settings_get_int("chg_on", 1)) {
+            buttons_sync_and_consume();
+            screen_on("USB connected");
+            break;
+        }
         switch (w) {
         case WAKE_BOOT:
         case WAKE_PWR:
@@ -320,6 +393,7 @@ static void run_screen_off(void)
 
 void controller_run(void)
 {
+    s_vbus = axp_vbus_good();
     screen_on("boot");
     while (1) {
         if (s_screen_on) {

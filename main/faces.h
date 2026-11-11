@@ -30,6 +30,9 @@ void faces_set_active(bool active);
 /* Re-read the battery-ring setting and level (caller holds the LVGL lock). */
 void faces_battery_ring_changed_nolock(void);
 
+/* Re-read the battery level now (USB plugged / unplugged). Takes the LVGL lock. */
+void faces_battery_refresh(void);
+
 /* Message box over the face; hide_after_ms <= 0 keeps it until the next call. */
 void faces_show_status(const char *text, int hide_after_ms);
 
