@@ -12,11 +12,18 @@ static const char *TAG = "display_dma";
 static uint8_t *s_bounce;
 static size_t s_bounce_size;
 static uint32_t s_too_big;
+static esp_lcd_panel_handle_t s_panel;       /* the board package keeps it private; seen here */
+
+esp_lcd_panel_handle_t display_dma_panel(void)
+{
+    return s_panel;
+}
 
 static esp_err_t draw_cb(lv_display_t *disp, esp_lcd_panel_handle_t panel, int x_start, int y_start,
                          int x_end, int y_end, const void *color_map, void *user_ctx)
 {
     (void)user_ctx;
+    s_panel = panel;
     size_t bytes = (size_t)(x_end - x_start) * (size_t)(y_end - y_start) *
                    lv_color_format_get_size(lv_display_get_color_format(disp));
     if (bytes > s_bounce_size) {

@@ -19,10 +19,12 @@
 #define BATTLOG_LOW_PERIOD_MIN 2      /* on battery below BATTLOG_LOW_MV */
 #define BATTLOG_LOW_MV         3500
 #define BATTLOG_EMPTY_MV       3350   /* screen-off reading at which the watch powers itself off */
+#define BATTLOG_RESTART_MV     3450   /* after an empty shutdown, minimum to start again on battery */
 
 typedef enum { BATTLOG_WAKE_BUTTON, BATTLOG_WAKE_TAP, BATTLOG_WAKE_MOTION_REJECTED } battlog_wake_t;
 
 void battlog_init(void);                          /* find the partition and the write position */
+bool battlog_last_run_ended_empty(void);          /* last record before this boot was "empty" */
 void battlog_sample(const char *why);
 bool battlog_due(void);
 uint64_t battlog_us_until_due(void);

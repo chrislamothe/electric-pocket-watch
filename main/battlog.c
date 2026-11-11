@@ -36,8 +36,8 @@ typedef struct __attribute__((packed)) {
 } rec_t;
 _Static_assert(sizeof(rec_t) == REC_SIZE, "record size");
 
-enum { WHY_UNKNOWN, WHY_BOOT, WHY_SLEEP, WHY_IDLE, WHY_AWAKE, WHY_EMPTY };
-static const char *const WHY_NAME[] = {"", "boot", "sleep", "idle", "awake", "empty"};
+enum { WHY_UNKNOWN, WHY_BOOT, WHY_SLEEP, WHY_IDLE, WHY_AWAKE, WHY_EMPTY, WHY_OFF };
+static const char *const WHY_NAME[] = {"", "boot", "sleep", "idle", "awake", "empty", "off"};
 
 static uint8_t why_code(const char *why)
 {
@@ -59,6 +59,12 @@ static uint32_t s_slots, s_head, s_seq;         /* next slot to write, next sequ
 static uint16_t s_boot;
 static int64_t s_last_us = -PERIOD_US;
 static int64_t s_period_us = PERIOD_US;
+static bool s_last_empty;                       /* the previous run ended with an empty-battery shutdown */
+
+bool battlog_last_run_ended_empty(void)
+{
+    return s_last_empty;
+}
 static uint16_t s_wakes[3];
 
 /* ---------------------------------------------------------------- storage */
@@ -85,6 +91,7 @@ void battlog_init(void)
             best_seq = r.seq;
             best_slot = i;
             s_boot = r.boot;
+            s_last_empty = r.why == WHY_EMPTY;
         }
     }
     s_head = any ? (best_slot + 1) % s_slots : 0;

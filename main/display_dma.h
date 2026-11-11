@@ -18,3 +18,7 @@
  * (double-buffered partial mode), so one buffer is enough. Call right after bsp_display_start().
  */
 void display_dma_init(lv_display_t *disp);
+
+/* The CO5300 panel handle, known after the first frame has been drawn (NULL before). */
+#include "esp_lcd_types.h"
+esp_lcd_panel_handle_t display_dma_panel(void);

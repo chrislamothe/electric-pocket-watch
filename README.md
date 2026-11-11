@@ -39,7 +39,7 @@ clock.
 |---|---|
 | Board | Waveshare ESP32-S3-Touch-AMOLED-1.75C (ESP32-S3 with octal PSRAM; the firmware uses 16 MB of flash) |
 | Display | 1.75" 466×466 AMOLED, CO5300 over QSPI, CST9217 touch |
-| PMIC | AXP2101 (battery %, USB detect, PWR long-press power-off) |
+| PMIC | AXP2101 (battery voltage, USB detect, software power-off) |
 | IMU | QMI8658 (wake-on-motion for double-tap) |
 
 The standard (non-"C") 1.75 board has different wiring and is **not** supported.
@@ -78,7 +78,7 @@ useful for checking the display or measuring screen power.
 | **BOOT** double press | Open or close Settings |
 | **BOOT** hold ~1 s | Sync the time now |
 | **PWR** press | Screen off / on |
-| **PWR** hold 6 s | Power off (handled by the PMIC, works even if the firmware is frozen). Press PWR to power on. |
+| **PWR** hold 3 s | Power off ("Hold to power off", then "Powering off"). Press PWR or plug in USB to power on. |
 | Swipe left / right | Next / previous face |
 | Swipe up | Open Settings |
 | Double-tap the case (screen off) | Wake |
@@ -183,6 +183,10 @@ tools/wifi.py       command-line Improv client, for debugging
   voltage curve measured on this cell. Below 3.35 V the watch shows "Battery empty" and powers
   itself off; USB or the PWR key turns it on again. The screen-off drain is still about 14 % of the
   screen-on drain, far above what light sleep should cost: work in progress.
+- **Screen-off power** (v0.9.0): while the screen is off the display panel is switched off
+  (DISPOFF), the touch controller is held in reset, and the speaker amplifier enable is latched
+  low; the audio codecs are never powered up. Settings > System shows how much of the screen-off
+  time was spent in light sleep.
 - **Battery log**: Settings > System > Send log over USB prints the log as CSV (one record per
   15 min, every 2 min below 3.5 V, with reset and power-off reasons at each boot).
 - Not yet measured: clock drift between syncs.

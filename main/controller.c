@@ -19,6 +19,7 @@
 #include "settings.h"
 #include "settings_ui.h"
 #include "splash.h"
+#include "lowpower.h"
 
 static const char *TAG = "ctl";
 
@@ -76,9 +77,12 @@ static void check_empty(int rest_mv)
 
 void controller_check_empty_at_boot(void)
 {
+    /* After an empty-battery shutdown the cell recovers a little; booting on that just browns out
+     * minutes later. Require BATTLOG_RESTART_MV then, BATTLOG_EMPTY_MV otherwise. */
+    int need = battlog_last_run_ended_empty() ? BATTLOG_RESTART_MV : BATTLOG_EMPTY_MV;
     for (int i = 0; i < 2; i++) {                    /* splash is lit: screen-on readings */
         int mv = axp_battery_mv();
-        if (axp_vbus_good() || mv <= 0 || mv + AXP_SCREEN_SAG_MV > BATTLOG_EMPTY_MV) {
+        if (axp_vbus_good() || mv <= 0 || mv + AXP_SCREEN_SAG_MV > need) {
             return;
         }
         vTaskDelay(pdMS_TO_TICKS(200));
@@ -124,6 +128,8 @@ static void screen_on(const char *why)
              axp_vbus_good(), (unsigned)heap_caps_get_free_size(MALLOC_CAP_INTERNAL | MALLOC_CAP_DMA),
              (unsigned)heap_caps_get_largest_free_block(MALLOC_CAP_INTERNAL | MALLOC_CAP_DMA));
     imu_off();
+    lowpower_off_end();
+    lowpower_screen_on();                            /* touch out of reset, panel DISPON */
     if (s_lvgl_paused) {
         esp_lv_adapter_resume();                     /* restart the LVGL worker and its tick */
         s_lvgl_paused = false;
@@ -152,6 +158,8 @@ static void screen_off(const char *why)
     } else {
         ESP_LOGW(TAG, "LVGL pause timed out");
     }
+    lowpower_screen_off();                           /* panel DISPOFF, touch held in reset */
+    lowpower_off_begin();
     s_screen_on = false;
 }
 
@@ -186,6 +194,40 @@ static void restore_from_dim(void)
         set_brightness(s_bright);
         s_dimmed = false;
     }
+}
+
+/* ---------------------------------------------------------------- PWR hold = power off */
+
+#define POWER_OFF_HOLD_MS 3000
+
+/* Called at the long-press report (0.8 s). The board's own PMIC hold-to-power-off never worked on
+ * this watch, so the firmware does it: keep holding to 3 s and the PMIC is told to power off
+ * (0x10 bit0, the same path as the empty-battery shutdown). PWR or USB turns it on again. */
+static void power_off_if_held(void)
+{
+    faces_show_status("Hold to power off", 0);
+    int held = 800;
+    while (buttons_pwr_down_raw() && held < POWER_OFF_HOLD_MS) {
+        vTaskDelay(pdMS_TO_TICKS(20));
+        held += 20;
+    }
+    if (held < POWER_OFF_HOLD_MS) {
+        faces_show_status("", 1);                    /* released early: cancel */
+        buttons_sync_and_consume();
+        touch_activity();
+        return;
+    }
+    ESP_LOGW(TAG, "PWR held %d ms: powering off", POWER_OFF_HOLD_MS);
+    faces_show_status("Powering off", 0);
+    battlog_sample("off");
+    vTaskDelay(pdMS_TO_TICKS(1000));
+    set_brightness(0);
+    axp_power_off();
+    vTaskDelay(pdMS_TO_TICKS(1000));
+    ESP_LOGE(TAG, "PMIC power-off failed");
+    faces_show_status("Power-off failed", 3000);
+    set_brightness(s_bright);
+    buttons_sync_and_consume();
 }
 
 /* ---------------------------------------------------------------- screen-on loop */
@@ -228,7 +270,7 @@ static void run_screen_on(void)
             screen_off("PWR");
             return;
         case BTN_PWR_LONG:
-            ESP_LOGI(TAG, "PWR long: the PMIC powers the board off if it stays held");
+            power_off_if_held();
             break;
         default:
             break;
@@ -337,7 +379,9 @@ static wake_src_t wait_for_wake(void)
         gpio_wakeup_enable(PIN_IMU_INT1, s_imu_idle_level ? GPIO_INTR_LOW_LEVEL : GPIO_INTR_HIGH_LEVEL);
         esp_sleep_enable_gpio_wakeup();
         esp_sleep_enable_timer_wakeup(battlog_us_until_due());    /* battery log sample */
+        lowpower_sleep_begin();
         esp_err_t r = esp_light_sleep_start();
+        lowpower_sleep_end(r == ESP_OK);
         gpio_wakeup_disable(PIN_BOOT);
         gpio_wakeup_disable(PIN_PWR);
         gpio_wakeup_disable(PIN_IMU_INT1);

@@ -29,6 +29,7 @@
 #include "esp_system.h"
 #include "axp.h"
 #include "battlog.h"
+#include "lowpower.h"
 #include "version.h"
 #include "bsp/esp-bsp.h"
 #include "faces.h"
@@ -643,9 +644,14 @@ static void build_display(void)
 static void build_system(void)
 {
     frame("System", 320);
-    char buf[420];
+    char buf[512];
     int o = snprintf(buf, sizeof(buf), "%s %s\n", WATCH_NAME, WATCH_VERSION);
     battlog_summary(buf + o, sizeof(buf) - o);
+    o = (int)strlen(buf);
+    if (o < (int)sizeof(buf) - 2) {
+        buf[o++] = '\n';
+        lowpower_summary(buf + o, sizeof(buf) - o);
+    }
     lv_obj_t *info = label(s_list, buf, &lv_font_montserrat_16, COL_TEXT);
     lv_obj_set_width(info, lv_pct(100));
     lv_label_set_long_mode(info, LV_LABEL_LONG_MODE_WRAP);
@@ -653,7 +659,7 @@ static void build_system(void)
     item(s_list, "Restart", on_restart, NULL);
     item(s_list, "Factory reset", on_factory_reset, NULL);
     item(s_list, "Back", on_to_main, NULL);
-    set_status("Frozen? Unplug USB, hold PWR 6 s to power off, then press PWR.");
+    set_status("Hold PWR 3 s to power off; press PWR to turn on.");
 }
 
 static void build_cb(void *arg)
