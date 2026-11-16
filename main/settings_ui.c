@@ -14,7 +14,7 @@
  * Pages are rebuilt through lv_async_call so a button is never deleted from inside its own
  * callback. Scan/join/sync run on a worker task; results return to the LVGL thread through
  * lv_async_call under the display lock. A 1 s LVGL timer refreshes the Wi-Fi status text.
- * Content stays inside a ~320 px column so it fits the round 466 px panel.
+ * Content stays inside a ~320 px column so it fits the round 466 px panels (and the 410 px wide 2.06).
  */
 #include "settings_ui.h"
 

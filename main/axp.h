@@ -4,7 +4,7 @@
 #include "driver/i2c_master.h"
 
 /*
- * AXP2101 PMIC (I2C 0x34). Its IRQ line is not routed to the ESP32 on the 1.75C, so it is polled.
+ * AXP2101 PMIC (I2C 0x34). Its IRQ line does not reach an ESP32 GPIO on any supported board, so it is polled.
  * Register map per XPowersLib (XPowersAXP2101.hpp):
  *   0x00 STATUS1: bit5 VBUS good, bit3 battery present
  *   0x01 STATUS2: bits[7:5] 0 standby, 1 charging, 2 discharging

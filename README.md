@@ -1,8 +1,8 @@
 # Electric Pocket Watch
 
-Firmware that turns the **Waveshare ESP32-S3-Touch-AMOLED-1.75C** into a pocket watch: classic
-analog dials on a 466×466 round AMOLED, screen off until you wake it, Wi-Fi only for setting the
-clock.
+Firmware that turns Waveshare's ESP32-S3 AMOLED boards into a pocket watch: classic analog
+dials, screen off until you wake it, Wi-Fi only for setting the clock. Supported boards:
+**ESP32-S3-Touch-AMOLED-1.75C**, **-1.75 / -1.75-B**, and **-2.06**.
 
 **Install it from your browser:** <https://chrislamothe.github.io/electric-pocket-watch/>
 (Chrome or Edge on a computer, USB-C data cable.)
@@ -35,22 +35,41 @@ clock.
 
 ## Hardware
 
-| | |
-|---|---|
-| Board | Waveshare ESP32-S3-Touch-AMOLED-1.75C (ESP32-S3 with octal PSRAM; the firmware uses 16 MB of flash) |
-| Display | 1.75" 466×466 AMOLED, CO5300 over QSPI, CST9217 touch |
-| PMIC | AXP2101 (battery voltage, USB detect, software power-off) |
-| IMU | QMI8658 (wake-on-motion for double-tap) |
+| Board (build ID) | Display | Touch | Clock chip | Status |
+|---|---|---|---|---|
+| ESP32-S3-Touch-AMOLED-1.75C (`175c`) | 1.75" 466×466 round, CO5300 | CST9217 | none | Tested on hardware |
+| ESP32-S3-Touch-AMOLED-1.75 / 1.75-B / 1.75-G (`175`) | 1.75" 466×466 round, CO5300 | CST9217 | PCF85063 | Built from Waveshare's schematic and board package; not yet tested on hardware |
+| ESP32-S3-Touch-AMOLED-2.06 (`206`) | 2.06" 410×502 rectangle, CO5300 | FT3168 | PCF85063 | Built from Waveshare's schematic and factory firmware; not yet tested on hardware |
 
-The standard (non-"C") 1.75 board has different wiring and is **not** supported.
+All three: ESP32-S3R8 (8 MB octal PSRAM; the firmware uses 16 MB of flash), AXP2101 PMIC
+(battery voltage, USB detect, software power-off), QMI8658 IMU (wake-on-motion for double-tap).
+The 1.75-B is the standard 1.75 in a protective case and runs the `175` firmware; the 1.75-G
+(GNSS) does too, without using its GPS. Each board needs its own firmware. On the 2.06 the round
+dials are drawn in the 410×410 square centred on the screen.
+
+Board differences the firmware handles (details in [boards/README.md](boards/README.md) and each
+`boards/<id>/board/include/board.h`):
+
+- **PWR button**: GPIO3 on the 1.75C, GPIO10 on the 2.06, but on the 1.75 / 1.75-B only through
+  the TCA9554 I/O expander, whose interrupt is not wired to the ESP32. There the PWR button can't
+  wake the chip directly, so while the screen is off the watch checks it every 200 ms.
+- **IMU interrupt**: GPIO21 everywhere, but it carries INT2 on the 1.75 / 1.75-B (INT1 goes to
+  the expander), so wake-on-motion is routed to INT2 there.
+- **Clock chip**: the 1.75 / 1.75-B and 2.06 have a PCF85063 on the AXP2101's always-on RTC
+  supply. The watch sets the system clock from it at power-on and writes it after every time sync,
+  so they keep the time while powered off.
+- **2.06 board package**: Waveshare's registry package (v2.0.0) uses a different LVGL layer with an
+  incompatible lock signature and registers the QSPI panel as an RGB panel. The 2.06 uses a local
+  package (`boards/206/board/bsp_206.c`) built from the corrected copy in Waveshare's 2.06 factory
+  firmware, with the same LVGL setup as the 1.75 boards.
 
 ## Installing
 
 ### From the browser (recommended)
 
 1. Open <https://chrislamothe.github.io/electric-pocket-watch/> in Chrome or Edge on a computer.
-2. Plug the watch in with a USB-C **data** cable and click **Connect watch**. Pick the port that
-   shows as *USB JTAG/serial debug unit*.
+2. Plug the watch in with a USB-C **data** cable and click the button for **your board**. Pick
+   the port that shows as *USB JTAG/serial debug unit*.
 3. Choose **Install**. When it finishes, the page asks for your Wi-Fi network and password. The
    watch joins once, sets its clock and turns Wi-Fi off again.
 
@@ -59,16 +78,13 @@ Android.
 
 ### From the command line
 
-Each CI run publishes a `firmware` artifact. `firmware-stage2.bin` is the full watch: a merged
-image flashed at offset 0.
+Each CI run publishes one artifact per board, `firmware-<id>` (`175c`, `175`, `206`), holding a
+merged image flashed at offset 0.
 
 ```sh
-gh run download <run-id> -R chrislamothe/electric-pocket-watch -n firmware -D fw
-esptool.py --chip esp32s3 -p COM3 -b 460800 write_flash 0x0 fw/firmware-stage2.bin
+gh run download <run-id> -R chrislamothe/electric-pocket-watch -n firmware-206 -D fw
+esptool.py --chip esp32s3 -p COM3 -b 460800 write_flash 0x0 fw/firmware-206.bin
 ```
-
-`firmware-stage1.bin` is a bring-up build: faces only, screen always on, no sleep or Wi-Fi. It's
-useful for checking the display or measuring screen power.
 
 ## Using the watch
 
@@ -99,8 +115,9 @@ Wi-Fi can also be changed from the install page: **Connect watch → Change Wi-F
 
 ### Time
 
-The board has no RTC chip or 32 kHz crystal, so the clock is lost on power-off. The watch syncs
-from `pool.ntp.org` about 3 s after power-on and whenever you hold BOOT or use **Set time now**.
+The 1.75C has no RTC chip, so its clock is lost on power-off; the 1.75 / 1.75-B and 2.06 keep
+time in their PCF85063 (see Hardware). The watch syncs from `pool.ntp.org` about 3 s after
+power-on and whenever you hold BOOT or use **Set time now**.
 A sync scans first and joins the saved network if it's in range. If that network isn't available,
 the watch tries up to three open networks, if allowed. Networks with a login page (hotels, cafés)
 usually block the time server; the watch reports that and moves on. Time zone: US Pacific with
@@ -110,22 +127,25 @@ automatic DST.
 
 Requires **ESP-IDF v5.5.5**.
 
+Pick the board with `-D BOARD=175c` (default), `175` or `206`; use one build directory per board.
+
 ```sh
-idf.py set-target esp32s3
-idf.py build
-idf.py -p COM3 flash monitor
+idf.py -B build-206 -D BOARD=206 set-target esp32s3
+idf.py -B build-206 -D BOARD=206 build
+idf.py -B build-206 -p COM3 flash monitor
 ```
 
-CI (`.github/workflows/build.yml`) builds both stages in the `espressif/idf:v5.5.5` container. It
-prints the key `sdkconfig` values, so an option that gets ignored is visible, and it uploads the
-merged binaries. On `main` it also publishes `site/` with the stage 2 firmware to GitHub Pages
-(ESP Web Tools).
+Each board has its own component lock file (`dependencies.<id>.lock`). CI
+(`.github/workflows/build.yml`) builds all three boards in the `espressif/idf:v5.5.5` container,
+prints the key `sdkconfig` values so an option that gets ignored is visible, and uploads the
+merged binaries. On `main` it also publishes `site/` to GitHub Pages (ESP Web Tools) with one
+install button and manifest per board; `manifest.json` / `firmware.bin` stay the 1.75C build for
+older links.
 
 Useful `idf.py menuconfig` options are under **Electric Pocket Watch**:
 
 | Option | Default | Notes |
 |---|---|---|
-| `WATCH_STAGE` | 1 | 2 = full watch (CI builds both) |
 | `WATCH_AWAKE_MS` | 10000 | Default screen-on time (Settings overrides it) |
 | `WATCH_SLEEP_ON_USB` | n | With USB power the watch idles instead of light-sleeping, so the serial log stays up |
 | `WATCH_WOM_THRESHOLD_MG` | 200 | Wake-on-motion threshold |
@@ -135,8 +155,9 @@ Useful `idf.py menuconfig` options are under **Electric Pocket Watch**:
 ### Project layout
 
 ```
+boards/<id>/board/  per-board pins, PWR button, board package (see boards/README.md)
 main/
-  main.c            boot sequence, stage 1 loop, boot-time sync
+  main.c            boot sequence, boot-time sync
   controller.c      screen on/off, buttons, light sleep and wake sources
   faces.c           face manager, battery indicator, status messages
   face_analog.c     Roman, Arabic, Black
@@ -148,21 +169,26 @@ main/
   battlog.c         battery log in its own flash partition, CSV export
   display_dma.c     preallocated strip buffer for display transfers
   splash.c          boot screen, "Battery empty" message
+  ext_rtc.c         PCF85063 clock chip (1.75 / 1.75-B, 2.06)
   imu.c axp.c buttons.c settings.c watch_time.c i2c_dev.c
   fonts/            Abril Fatface digits for the railroad dials (generated with lv_font_conv)
 site/               ESP Web Tools install page and manifest
 tools/wifi.py       command-line Improv client, for debugging
 ```
 
-### Board notes (verified on hardware)
+### Board notes
 
-| Signal | Pin / address |
-|---|---|
-| I²C bus | SCL 14, SDA 15. AXP2101 0x34, QMI8658 0x6B, CST9217 0x5A, ES8311 0x18, ES7210 0x40 |
-| BOOT button | GPIO0, active low |
-| PWR key | GPIO3 (SYS_OUT through a FET), high while held; the PMIC also sees it |
-| IMU INT1 | GPIO21 (INT2 is not connected) |
-| AXP2101 IRQ | not routed to the ESP32, so the PMIC is polled |
+| Signal | 1.75C (verified on hardware) | 1.75 / 1.75-B | 2.06 |
+|---|---|---|---|
+| I²C bus (SCL/SDA) | 14 / 15 | 14 / 15 | 14 / 15 |
+| I²C devices | AXP2101 0x34, QMI8658 0x6B, CST9217 0x5A, ES8311 0x18, ES7210 0x40 | same + TCA9554 0x20, PCF85063 0x51 | AXP2101 0x34, QMI8658 0x6B, FT3168 0x38, PCF85063 0x51, ES8311 0x18, ES7210 0x40 |
+| BOOT button | GPIO0, active low | GPIO0 | GPIO0 |
+| PWR key (SYS_OUT, high while held) | GPIO3 | TCA9554 P4 | GPIO10 |
+| IMU wake interrupt | GPIO21 = INT1 | GPIO21 = INT2 (INT1 on TCA9554 P6) | GPIO21 = INT1 |
+| LCD reset / touch reset | GPIO1 / GPIO2 | GPIO39 / GPIO40 | GPIO8 / GPIO9 |
+| Speaker amplifier enable | GPIO46 | GPIO46 | GPIO46 |
+| Other | | RTC INT on TCA9554 P3 | vibration motor GPIO18, RTC INT GPIO39 |
+| AXP2101 IRQ | not routed | TCA9554 P5 | not routed |
 
 - The QMI8658 keeps power across ESP32 resets and is soft-reset on every mode change. Accelerometer
   data freezes after leaving wake-on-motion without a reset.
@@ -178,9 +204,10 @@ tools/wifi.py       command-line Improv client, for debugging
 
 ## Status and known limits
 
-- **Battery** (measured, v0.8.3): about 6 h with the screen always on, about 46 h from full with
-  the screen off. Charging from 20 % takes about 1 h 45 min. The percentage comes from a
-  voltage curve measured on this cell. Below 3.35 V the watch shows "Battery empty" and powers
+- **Battery** (measured on the 1.75C, v0.8.3 to v0.8.6): about 6 h with the screen always on,
+  48.5 h from full with the screen off. Charging from 20 % takes about 1 h 45 min. The percentage
+  comes from a voltage curve measured on that cell; other boards use the same curve (single-cell
+  LiPo shape) until measured, so expect a few points of error there. Below 3.35 V the watch shows "Battery empty" and powers
   itself off; USB or the PWR key turns it on again. The screen-off drain is still about 14 % of the
   screen-on drain, far above what light sleep should cost: work in progress.
 - **Screen-off power** (v0.9.0): while the screen is off the display panel is switched off
@@ -189,6 +216,10 @@ tools/wifi.py       command-line Improv client, for debugging
   time was spent in light sleep.
 - **Battery log**: Settings > System > Send log over USB prints the log as CSV (one record per
   15 min, every 2 min below 3.5 V, with reset and power-off reasons at each boot).
+- **1.75 / 1.75-B**: polling the PWR button every 200 ms while the screen is off costs some
+  standby time (not yet measured). BOOT and double-tap wake without it.
+- **2.06**: the touch controller stays powered while the screen is off (its driver's start-up
+  configuration would be lost if it were held in reset).
 - Not yet measured: clock drift between syncs.
 - Double-tap sensitivity is a first tuning.
 - Planned: hinged-lid opening animation, time-zone setting, alarm with chime.

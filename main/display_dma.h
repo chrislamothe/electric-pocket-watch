@@ -5,7 +5,7 @@
 /*
  * Display transfer path without per-strip memory allocation.
  *
- * The board package renders into two PSRAM strips (466 x 50 px) and hands each one to the SPI
+ * The board package renders into two PSRAM strips (display width x 50 px) and hands each one to the SPI
  * driver. The SPI DMA cannot read PSRAM here, so the driver allocated a ~46 KB internal-RAM copy
  * for every strip and freed it afterwards. When internal RAM was short or fragmented (Wi-Fi,
  * building a face) the allocation failed, the strip was dropped, and the panel kept whatever it
