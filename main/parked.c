@@ -9,6 +9,11 @@
 
 static const char *TAG = "parked";
 
+/* ESP-IDF isolates (floats) every GPIO during light sleep unless told otherwise
+ * ("sleep_gpio: Configure to isolate all GPIO pins in sleep state" in the boot log). The pins
+ * driven here must keep their level while asleep: a floating reset or enable line could wake the
+ * chip behind it. gpio_sleep_sel_dis() keeps the pin's normal configuration in sleep; unlike
+ * gpio_hold it does not outlive a reset. */
 static void out_low(int pin)
 {
     if (pin < 0) {
@@ -18,9 +23,11 @@ static void out_low(int pin)
     gpio_config_t cfg = {
         .pin_bit_mask = BIT64(pin),
         .mode = GPIO_MODE_OUTPUT,
+        .pull_down_en = GPIO_PULLDOWN_ENABLE,
     };
     gpio_config(&cfg);
     gpio_set_level((gpio_num_t)pin, 0);
+    gpio_sleep_sel_dis((gpio_num_t)pin);
 }
 
 /* ---------------------------------------------------------------- touch */
@@ -36,6 +43,7 @@ static void touch_sleep(i2c_master_bus_handle_t bus)
         .mode = GPIO_MODE_OUTPUT,
     };
     gpio_config(&cfg);
+    gpio_sleep_sel_dis(rst);                            /* stays high (released) in light sleep */
     gpio_set_level(rst, 0);
     vTaskDelay(pdMS_TO_TICKS(10));
     gpio_set_level(rst, 1);
@@ -99,6 +107,7 @@ static void imu_power_down(i2c_master_bus_handle_t bus)
         .pull_down_en = GPIO_PULLDOWN_ENABLE,           /* interrupt pin unused: keep it defined */
     };
     gpio_config(&cfg);
+    gpio_sleep_sel_dis((gpio_num_t)BOARD_PIN_IMU_INT);
     if (e == ESP_OK) {
         ESP_LOGI(TAG, "accelerometer powered down (id 0x%02X)", who);
     } else {
