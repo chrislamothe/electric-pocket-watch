@@ -13,6 +13,7 @@
 #include "freertos/task.h"
 #include "esp_heap_caps.h"
 #include "esp_log.h"
+#include "driver/gpio.h"
 #include "bsp/esp-bsp.h"
 #include "axp.h"
 #include "battlog.h"
@@ -67,6 +68,12 @@ static void stage1_loop(void)
 
 void app_main(void)
 {
+    /* v0.9.0/v0.10.0 latched the touch reset (GPIO2) and amplifier enable (GPIO46) with
+     * gpio_hold_en(). A pad hold survives resets and reflashing until power is removed, so a
+     * watch that ran those builds keeps GPIO2 low: touch (and the panel, if it shares that reset)
+     * stays dead. Release both before anything configures the pins. */
+    gpio_hold_dis(GPIO_NUM_2);
+    gpio_hold_dis(GPIO_NUM_46);
     improv_start();                             /* USB serial driver first: console goes through it */
     ESP_LOGI(TAG, "%s %s stage %d (built %s %s)", WATCH_NAME, WATCH_VERSION, CONFIG_WATCH_STAGE,
              __DATE__, __TIME__);
