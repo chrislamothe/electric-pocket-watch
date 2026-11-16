@@ -21,7 +21,9 @@
 #define BATTLOG_EMPTY_MV       3350   /* screen-off reading at which the watch powers itself off */
 #define BATTLOG_RESTART_MV     3450   /* after an empty shutdown, minimum to start again on battery */
 
-typedef enum { BATTLOG_WAKE_BUTTON, BATTLOG_WAKE_TAP, BATTLOG_WAKE_MOTION_REJECTED } battlog_wake_t;
+/* What turned the screen on. Stored in the three wake columns of the log (named button/tap/motion
+ * before v0.11.2, when the watch still had tap wake). */
+typedef enum { BATTLOG_WAKE_BOOT, BATTLOG_WAKE_PWR, BATTLOG_WAKE_USB } battlog_wake_t;
 
 void battlog_init(void);                          /* find the partition and the write position */
 bool battlog_last_run_ended_empty(void);          /* last record before this boot was "empty" */

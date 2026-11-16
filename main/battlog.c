@@ -206,7 +206,7 @@ static void dump_one(const rec_t *r, void *ctx)
 
 void battlog_dump(void)
 {
-    printf("BATTLOG,seq,boot,epoch,uptime_s,mv,gauge,usb,charge,wakes_button,wakes_tap,wakes_motion,"
+    printf("BATTLOG,seq,boot,epoch,uptime_s,mv,gauge,usb,charge,wakes_boot,wakes_pwr,wakes_usb,"
            "why,reset,pon,poff\n");
     for_each(dump_one, NULL);
     printf("BATTLOG,end,shutdown_mv=%d,charge_target_mv=%d\n", axp_shutdown_mv(), axp_charge_target_mv());
@@ -315,7 +315,7 @@ void battlog_summary(char *buf, size_t len)
     }
     if (o < len) {
         snprintf(buf + o, len - o,
-                 "Wakes this boot: %u button, %u tap, %u motion only\nShuts down at %d mV (power cut %d mV)",
+                 "Screen wakes this boot: %u BOOT, %u PWR, %u USB\nShuts down at %d mV (power cut %d mV)",
                  s_wakes[0], s_wakes[1], s_wakes[2], BATTLOG_EMPTY_MV, axp_shutdown_mv());
     }
 }
