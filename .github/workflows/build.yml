@@ -49,10 +49,46 @@ jobs:
             dependencies.${{ matrix.board }}.lock
           if-no-files-found: error
 
+  stable:
+    # The last firmware confirmed on real hardware (site/stable.txt: "<git ref> <version> <board>").
+    # Rebuilt from that exact commit so the install page always offers a known-good build.
+    runs-on: ubuntu-latest
+    container: espressif/idf:v5.5.5
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+      - name: Build stable firmware
+        shell: bash
+        run: |
+          set -e
+          git config --global --add safe.directory "*"
+          read REF VER BOARD < site/stable.txt
+          echo "stable: $REF v$VER board $BOARD"
+          git worktree add ../stable "$REF"
+          cd ../stable
+          . "$IDF_PATH/export.sh"
+          if [ -f sdkconfig.stage2 ]; then
+            D="sdkconfig.defaults;sdkconfig.stage2"       # layout before v0.10.0
+            idf.py -B b -D SDKCONFIG=b/sdkconfig -D SDKCONFIG_DEFAULTS="$D" set-target esp32s3
+            idf.py -B b -D SDKCONFIG=b/sdkconfig -D SDKCONFIG_DEFAULTS="$D" build
+          else
+            idf.py -B b -D BOARD=$BOARD -D SDKCONFIG=b/sdkconfig set-target esp32s3
+            idf.py -B b -D BOARD=$BOARD -D SDKCONFIG=b/sdkconfig build
+          fi
+          idf.py -B b -D SDKCONFIG=b/sdkconfig merge-bin -o merged-stable.bin
+          cp -f "$(find . -name merged-stable.bin | head -1)" "$GITHUB_WORKSPACE/firmware-stable.bin"
+          ls -l "$GITHUB_WORKSPACE/firmware-stable.bin"
+      - uses: actions/upload-artifact@v7
+        with:
+          name: firmware-stable
+          path: firmware-stable.bin
+          if-no-files-found: error
+
   pages:
     # Publishes the browser installer (ESP Web Tools): one install button and manifest per board.
     if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main'
-    needs: build
+    needs: [build, stable]
     continue-on-error: true
     runs-on: ubuntu-latest
     permissions:
@@ -79,11 +115,12 @@ jobs:
             cp fw/firmware-$B.bin _site/firmware-$B.bin
             sed -e "s/__VERSION__/$VER/g" -e "s/__FIRMWARE__/firmware-$B.bin/g" site/manifest.json > _site/manifest-$B.json
           done
-          # Links from before multi-board support point at manifest.json / firmware.bin (1.75C).
-          cp _site/manifest-175c.json _site/manifest.json
-          sed -i "s/firmware-175c.bin/firmware.bin/" _site/manifest.json
-          cp _site/firmware-175c.bin _site/firmware.bin
-          sed -i "s/__VERSION__/$VER/g" _site/index.html
+          # Stable = last build confirmed on hardware. Older links (manifest.json / firmware.bin) get it too.
+          read SREF SVER SBOARD < site/stable.txt
+          cp fw/firmware-stable.bin _site/firmware-stable.bin
+          sed -e "s/__VERSION__/$SVER/g" -e "s/__FIRMWARE__/firmware-stable.bin/g" site/manifest.json > _site/manifest-stable.json
+          cp _site/manifest-stable.json _site/manifest.json
+          sed -i -e "s/__VERSION__/$VER/g" -e "s/__STABLE__/$SVER/g" _site/index.html
           ls -l _site
           cat _site/manifest-206.json
       - uses: actions/upload-pages-artifact@v5

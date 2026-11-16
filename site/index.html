@@ -30,17 +30,29 @@
 <body>
 <main>
   <h1>Electric Pocket Watch</h1>
-  <p class="sub">Firmware for Waveshare ESP32-S3 AMOLED boards &middot; version <span id="ver">__VERSION__</span></p>
+  <p class="sub">Firmware for Waveshare ESP32-S3 AMOLED boards</p>
 
   <div class="card">
-    <h2>Install or set up Wi-Fi</h2>
+    <h2>Stable: version __STABLE__ (1.75C only)</h2>
+    <p class="dim">The last version confirmed working on a real ESP32-S3-Touch-AMOLED-1.75C. Use this unless you are testing.</p>
+    <esp-web-install-button manifest="manifest-stable.json">
+      <button slot="activate">Connect 1.75C (stable)</button>
+      <span slot="unsupported" class="warn">This browser can't talk to USB devices. Use Chrome or Edge on a computer.</span>
+      <span slot="not-allowed" class="warn">This page must be opened over https.</span>
+    </esp-web-install-button>
+    <p class="dim">If the watch doesn't show up as a port: unplug it, hold BOOT, plug it in while holding, then release and click again.</p>
+  </div>
+
+  <div class="card">
+    <h2>Test builds: version __VERSION__</h2>
+    <p class="dim warn">Not yet confirmed on hardware. They may not work; the stable button above always restores a 1.75C.</p>
     <p class="dim">Pick your board. The model is printed on the box label (for example <i>ESP32-S3-Touch-AMOLED-1.75C-EN</i>). Each board needs its own firmware.</p>
     <div class="boards">
       <div class="board">
         <b>ESP32-S3-Touch-AMOLED-1.75C</b>
         <p class="dim">1.75&Prime; round, aluminium case</p>
         <esp-web-install-button manifest="manifest-175c.json">
-          <button slot="activate">Connect 1.75C</button>
+          <button slot="activate">Connect 1.75C (test)</button>
           <span slot="unsupported" class="warn">This browser can't talk to USB devices. Use Chrome or Edge on a computer.</span>
           <span slot="not-allowed" class="warn">This page must be opened over https.</span>
         </esp-web-install-button>
@@ -49,7 +61,7 @@
         <b>ESP32-S3-Touch-AMOLED-1.75 / 1.75-B</b>
         <p class="dim">1.75&Prime; round, bare board or with protective case (SKU 31261 / 31262)</p>
         <esp-web-install-button manifest="manifest-175.json">
-          <button slot="activate">Connect 1.75 / 1.75-B</button>
+          <button slot="activate">Connect 1.75 / 1.75-B (test)</button>
           <span slot="unsupported" class="warn">This browser can't talk to USB devices. Use Chrome or Edge on a computer.</span>
           <span slot="not-allowed" class="warn">This page must be opened over https.</span>
         </esp-web-install-button>
@@ -58,7 +70,7 @@
         <b>ESP32-S3-Touch-AMOLED-2.06</b>
         <p class="dim">2.06&Prime; rectangular watch board (SKU 31957)</p>
         <esp-web-install-button manifest="manifest-206.json">
-          <button slot="activate">Connect 2.06</button>
+          <button slot="activate">Connect 2.06 (test)</button>
           <span slot="unsupported" class="warn">This browser can't talk to USB devices. Use Chrome or Edge on a computer.</span>
           <span slot="not-allowed" class="warn">This page must be opened over https.</span>
         </esp-web-install-button>
