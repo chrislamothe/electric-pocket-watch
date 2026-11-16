@@ -334,15 +334,45 @@ static void run_screen_on(void)
 
 /* ---------------------------------------------------------------- screen-off cycle */
 
+/* A button that reads pressed for 3 s when the screen goes off is treated as stuck (or leaning on
+ * something in a pocket): it is ignored as a wake source until it reads released again, instead of
+ * waking the screen over and over. */
+static bool s_ignore_boot, s_ignore_pwr;
+static uint32_t s_false_wakes;
+
 static wake_src_t wake_pins(void)
 {
-    if (buttons_boot_down_raw()) {
+    bool boot = buttons_boot_down_raw(), pwr = buttons_pwr_down_raw();
+    if (s_ignore_boot && !boot) {
+        s_ignore_boot = false;
+        ESP_LOGI(TAG, "BOOT released: wakes the screen again");
+    }
+    if (s_ignore_pwr && !pwr) {
+        s_ignore_pwr = false;
+        ESP_LOGI(TAG, "PWR released: wakes the screen again");
+    }
+    if (boot && !s_ignore_boot) {
         return WAKE_BOOT;
     }
-    if (buttons_pwr_down_raw()) {
+    if (pwr && !s_ignore_pwr) {
         return WAKE_PWR;
     }
     return WAKE_NONE;
+}
+
+/* A press must hold for 50 ms to count: a glitch on a button pin does not light the screen. */
+static bool wake_confirmed(wake_src_t w)
+{
+    for (int i = 0; i < 5; i++) {
+        vTaskDelay(pdMS_TO_TICKS(10));
+        if (wake_pins() != w) {
+            s_false_wakes++;
+            ESP_LOGW(TAG, "%s glitch ignored (%lu so far)", w == WAKE_BOOT ? "BOOT" : "PWR",
+                     (unsigned long)s_false_wakes);
+            return false;
+        }
+    }
+    return true;
 }
 
 static void wait_buttons_released(int max_ms)
@@ -369,12 +399,19 @@ static wake_src_t wait_for_wake(void)
         light = false;                               /* Wi-Fi is in use: idle instead of sleeping */
     }
     if (light) {
-        gpio_wakeup_enable(PIN_BOOT, GPIO_INTR_LOW_LEVEL);
+        if (!s_ignore_boot) {
+            gpio_wakeup_enable(PIN_BOOT, GPIO_INTR_LOW_LEVEL);
+        }
 #if BOARD_PIN_PWR >= 0
-        gpio_wakeup_enable((gpio_num_t)BOARD_PIN_PWR, GPIO_INTR_HIGH_LEVEL);
+        if (!s_ignore_pwr) {
+            gpio_wakeup_enable((gpio_num_t)BOARD_PIN_PWR, GPIO_INTR_HIGH_LEVEL);
+        }
 #endif
         esp_sleep_enable_gpio_wakeup();
         uint64_t wake_us = battlog_us_until_due();              /* battery log sample */
+        if ((s_ignore_boot || s_ignore_pwr) && wake_us > 1000000) {
+            wake_us = 1000000;                                  /* look for the stuck button's release */
+        }
 #if BOARD_PWR_POLL_MS > 0
         if (wake_us > (uint64_t)BOARD_PWR_POLL_MS * 1000) {
             wake_us = (uint64_t)BOARD_PWR_POLL_MS * 1000;       /* read PWR (not a wake pin) */
@@ -407,6 +444,14 @@ static wake_src_t wait_for_wake(void)
 static void run_screen_off(void)
 {
     wait_buttons_released(3000);                     /* a held button would reject every sleep */
+    if (buttons_boot_down_raw()) {
+        s_ignore_boot = true;
+        ESP_LOGW(TAG, "BOOT reads pressed 3 s after screen off: ignored until released");
+    }
+    if (buttons_pwr_down_raw()) {
+        s_ignore_pwr = true;
+        ESP_LOGW(TAG, "PWR reads pressed 3 s after screen off: ignored until released");
+    }
     while (!s_screen_on) {
         wake_src_t w = wait_for_wake();
         if (vbus_poll() && settings_get_int("chg_on", 1)) {
@@ -416,11 +461,12 @@ static void run_screen_off(void)
             faces_show_status("Woke: USB power", 3000);     /* test builds: shows why it lit up */
             break;
         }
-        if (w != WAKE_NONE) {
+        if (w != WAKE_NONE && wake_confirmed(w)) {
             buttons_sync_and_consume();              /* this press only wakes the screen */
             battlog_note_wake(w == WAKE_BOOT ? BATTLOG_WAKE_BOOT : BATTLOG_WAKE_PWR);
             screen_on(w == WAKE_BOOT ? "BOOT" : "PWR");
             faces_show_status(w == WAKE_BOOT ? "Woke: BOOT" : "Woke: PWR", 3000);
+            s_ignore_boot = s_ignore_pwr = false;
         }
     }
 }
