@@ -1,14 +1,14 @@
 # Board support
 
-One directory per supported board. The build includes exactly one of them as the component
-`board` (top-level `CMakeLists.txt`, `-D BOARD=<id>`), so the rest of the firmware is the same
-for every board.
+One directory per supported board. The build includes exactly one of them
+(`boards/<id>/board`, the component `board`; top-level `CMakeLists.txt`, `-D BOARD=<id>`), so
+the rest of the firmware is the same for every board.
 
 | ID | Board | Display | Board package |
 |---|---|---|---|
 | `175c` | Waveshare ESP32-S3-Touch-AMOLED-1.75C | 466×466 round, CO5300 | `waveshare/esp32_s3_touch_amoled_1_75c` |
 | `175` | Waveshare ESP32-S3-Touch-AMOLED-1.75, -1.75-B (with case), -1.75-G | 466×466 round, CO5300 | `waveshare/esp32_s3_touch_amoled_1_75` |
-| `206` | Waveshare ESP32-S3-Touch-AMOLED-2.06 | 410×502 rectangle, CO5300 (SH8601 command set) | local (`boards/206/bsp_206.c`) |
+| `206` | Waveshare ESP32-S3-Touch-AMOLED-2.06 | 410×502 rectangle, CO5300 (SH8601 command set) | local (`boards/206/board/bsp_206.c`) |
 
 Each board provides:
 

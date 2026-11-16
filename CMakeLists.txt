@@ -10,6 +10,7 @@ set(WATCH_BOARDS 175c 175 206)
 if(NOT BOARD IN_LIST WATCH_BOARDS)
     message(FATAL_ERROR "Unknown BOARD '${BOARD}'. Use one of: ${WATCH_BOARDS}")
 endif()
+# boards/<BOARD>/board is the component "board" for the selected board.
 set(EXTRA_COMPONENT_DIRS "${CMAKE_CURRENT_LIST_DIR}/boards/${BOARD}")
 
 include($ENV{IDF_PATH}/tools/cmake/project.cmake)
