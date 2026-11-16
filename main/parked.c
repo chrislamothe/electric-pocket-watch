@@ -30,58 +30,6 @@ static void out_low(int pin)
     gpio_sleep_sel_dis((gpio_num_t)pin);
 }
 
-/* ---------------------------------------------------------------- touch */
-
-/* Reset pulse (the chip may already be asleep from the previous boot, and then ignores I2C), then
- * the controller's own deep-sleep command. Reset stays released. */
-static void touch_sleep(i2c_master_bus_handle_t bus)
-{
-    const gpio_num_t rst = (gpio_num_t)BOARD_PIN_TOUCH_RST;
-    gpio_hold_dis(rst);
-    gpio_config_t cfg = {
-        .pin_bit_mask = BIT64(rst),
-        .mode = GPIO_MODE_OUTPUT,
-    };
-    gpio_config(&cfg);
-    gpio_sleep_sel_dis(rst);                            /* stays high (released) in light sleep */
-    gpio_set_level(rst, 0);
-    vTaskDelay(pdMS_TO_TICKS(10));
-    gpio_set_level(rst, 1);
-    vTaskDelay(pdMS_TO_TICKS(BOARD_TOUCH_BOOT_MS));
-
-    i2c_device_config_t dc = {
-        .dev_addr_length = I2C_ADDR_BIT_LEN_7,
-        .device_address = BOARD_TOUCH_ADDR,
-        .scl_speed_hz = 400000,
-    };
-    i2c_master_dev_handle_t dev = NULL;
-    if (i2c_master_bus_add_device(bus, &dc, &dev) != ESP_OK) {
-        ESP_LOGW(TAG, "touch: I2C device not added");
-        return;
-    }
-    esp_err_t e;
-#if BOARD_TOUCH_CHIP == 9217
-    /* CST92xx: command mode (0xD101), then sleep (0xD105). Same sequence as SensorLib
-     * TouchDrvCST92xx::sleep(); a reset pulse is the only way back. */
-    const uint8_t cmd_mode[2] = {0xD1, 0x01}, sleep[2] = {0xD1, 0x05};
-    e = i2c_master_transmit(dev, cmd_mode, sizeof(cmd_mode), 100);
-    vTaskDelay(pdMS_TO_TICKS(10));
-    if (e == ESP_OK) {
-        e = i2c_master_transmit(dev, sleep, sizeof(sleep), 100);
-    }
-#else
-    /* FT3168 (FT5x06 register set): power mode register 0xA5 = 3, hibernate. */
-    const uint8_t hib[2] = {0xA5, 0x03};
-    e = i2c_master_transmit(dev, hib, sizeof(hib), 100);
-#endif
-    i2c_master_bus_rm_device(dev);
-    if (e == ESP_OK) {
-        ESP_LOGI(TAG, "touch controller asleep");
-    } else {
-        ESP_LOGW(TAG, "touch controller did not take the sleep command: %s", esp_err_to_name(e));
-    }
-}
-
 /* ---------------------------------------------------------------- accelerometer */
 
 /* QMI8658 (0x6B). It keeps power across ESP32 resets and may still be in wake-on-motion from an
@@ -165,7 +113,6 @@ void parked_init(i2c_master_bus_handle_t bus)
 {
     out_low(BOARD_PIN_SPEAKER_PA);                      /* amplifier enable */
     out_low(BOARD_PIN_MOTOR);
-    touch_sleep(bus);
     imu_power_down(bus);
     audio_power_down(bus);
 }

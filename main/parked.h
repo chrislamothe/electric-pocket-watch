@@ -3,9 +3,9 @@
 #include "driver/i2c_master.h"
 
 /*
- * Hardware the watch does not use, put into its lowest-power state once at boot: the touch
- * controller, the accelerometer, the audio codecs and speaker amplifier, the vibration motor.
- * The watch is operated with the BOOT and PWR buttons only.
+ * Hardware the watch does not use, put into its lowest-power state once at boot: the
+ * accelerometer, the audio codecs and speaker amplifier, the vibration motor. (The touch
+ * controller sleeps too, except while the Settings menu is open: main/touch.c.)
  *
  * Nothing here is required for the watch to work: a chip that does not answer is logged and
  * skipped. No pin is latched with gpio_hold (a latch survives resets and reflashing; v0.9.0 and

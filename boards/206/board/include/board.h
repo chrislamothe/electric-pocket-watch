@@ -17,8 +17,9 @@
 #define BOARD_PWR_POLL_MS     0
 #define BOARD_PIN_IMU_INT     21    /* QMI8658 INT1; unused, pulled down */
 #define BOARD_PIN_TOUCH_RST   BSP_LCD_TOUCH_RST     /* GPIO9 */
-#define BOARD_TOUCH_CHIP      3168  /* FT3168: unused, put to sleep at boot (main/parked.c) */
+#define BOARD_TOUCH_CHIP      3168  /* FT3168: asleep except in Settings (main/touch.c) */
 #define BOARD_TOUCH_ADDR      0x38
+#define BOARD_TOUCH_MIRROR    0     /* 1 = x and y both reversed relative to the panel */
 #define BOARD_TOUCH_BOOT_MS   300   /* after the reset pulse, before it takes commands */
 #define BOARD_PIN_SPEAKER_PA  BSP_POWER_AMP_IO      /* GPIO46 */
 #define BOARD_PIN_MOTOR       18    /* MMBT3904 base: high = vibrate; kept low (main/parked.c) */

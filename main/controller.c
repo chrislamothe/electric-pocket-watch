@@ -17,6 +17,7 @@
 #include "net.h"
 #include "settings.h"
 #include "settings_ui.h"
+#include "touch.h"
 #include "splash.h"
 #include "lowpower.h"
 
@@ -151,6 +152,8 @@ static void screen_off(const char *why)
 {
     ESP_LOGI(TAG, "screen OFF (%s)", why);
     settings_ui_close();
+    touch_set_active(false);
+    touch_wait_settled(300);                         /* touch controller asleep before light sleep */
     set_brightness(0);
     faces_set_active(false);
     /* Stop the LVGL worker (waits for any flush in progress) before light sleep, as the

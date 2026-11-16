@@ -1,5 +1,6 @@
 /*
- * Settings menu drawn over the face, operated with the BOOT button (the watch has no touch input):
+ * Settings menu drawn over the face. Touch works here and only here (main/touch.c wakes the
+ * controller while the menu is open); the BOOT button works it too:
  *
  *   BOOT short  = move the highlight to the next item
  *   BOOT hold   = activate the highlighted item
@@ -24,6 +25,7 @@
  * Content stays inside a ~320 px column so it fits the round 466 px panels (and the 410 px wide 2.06).
  */
 #include "settings_ui.h"
+#include "touch.h"
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -83,13 +85,14 @@ static bool s_reset_armed;          /* factory reset needs a second activation *
 static const int AWAKE_CHOICES[] = {5, 10, 20, 30, 0};   /* 0 = always on */
 static const int BRIGHT_CHOICES[] = {20, 40, 60, 80, 100};
 #define BRIGHT_COUNT ((int)(sizeof(BRIGHT_CHOICES) / sizeof(BRIGHT_CHOICES[0])))
-#define HINT "BOOT: next   hold: select   double: close"
+#define HINT "Touch, or BOOT: next / hold: select"
 #define AWAKE_COUNT ((int)(sizeof(AWAKE_CHOICES) / sizeof(AWAKE_CHOICES[0])))
 
 static void go(page_t page);
 
 static void forget_panel(void)
 {
+    touch_set_active(false);                        /* every way of closing the menu ends here */
     if (s_refresh) {
         lv_timer_delete(s_refresh);
         s_refresh = NULL;
@@ -225,6 +228,7 @@ static lv_obj_t *button(lv_obj_t *parent, int h, lv_event_cb_t cb, void *user)
     lv_obj_set_style_bg_opa(b, LV_OPA_COVER, 0);
     lv_obj_set_style_bg_color(b, lv_color_hex(COL_ITEM), 0);
     lv_obj_set_style_bg_color(b, lv_color_hex(COL_ITEM_PR), LV_STATE_FOCUSED);
+    lv_obj_set_style_bg_color(b, lv_color_hex(COL_ITEM_PR), LV_STATE_PRESSED);
     lv_obj_set_style_border_color(b, lv_color_hex(COL_BRASS), LV_STATE_FOCUSED);
     lv_obj_set_style_border_width(b, 3, LV_STATE_FOCUSED);
     lv_obj_set_style_pad_hor(b, 22, 0);
@@ -561,7 +565,7 @@ static void build_display(void)
     item(s_list, txt, on_awake, NULL);
     snprintf(txt, sizeof(txt), "On while charging: %s", settings_get_int("chg_on", 1) ? "On" : "Off");
     item(s_list, txt, on_chg_on, NULL);
-    snprintf(txt, sizeof(txt), "Battery: %s", settings_get_int("batt_ring", 1) ? "On" : "Off");
+    snprintf(txt, sizeof(txt), "Battery indicator: %s", settings_get_int("batt_ring", 1) ? "On" : "Off");
     item(s_list, txt, on_batt_ring, NULL);
     item(s_list, "Back", on_to_main, NULL);
 }
@@ -636,6 +640,7 @@ void settings_ui_open_nolock(void)
     s_focus = 0;
     build_main();
     apply_focus();
+    touch_set_active(true);                         /* the menu is the only place with touch */
     s_refresh = lv_timer_create(refresh_cb, 1000, NULL);
 }
 

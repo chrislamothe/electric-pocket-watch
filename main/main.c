@@ -24,6 +24,7 @@
 #include "lowpower.h"
 #include "faces.h"
 #include "parked.h"
+#include "touch.h"
 #include "improv.h"
 #include "net.h"
 #include "ext_rtc.h"
@@ -67,7 +68,8 @@ void app_main(void)
 
     i2c_master_bus_handle_t bus = bsp_i2c_get_handle();
     board_init(bus);
-    parked_init(bus);                           /* touch, accelerometer, audio: asleep for good */
+    parked_init(bus);                           /* accelerometer, audio: off for good */
+    touch_init(bus);                            /* asleep except in the Settings menu */
     if (ext_rtc_init(bus)) {
         ext_rtc_restore_system_time();              /* before the first battery-log record */
     }

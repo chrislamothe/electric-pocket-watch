@@ -18,8 +18,9 @@ dials, screen off until you wake it, Wi-Fi only for setting the clock. Supported
   - **Calendar**: triple calendar with a moon phase. It has day and month windows, a 1–31 date ring read by a brass pointer, a live moon-phase window at 6 and a red seconds hand.
   - **Railroad**: cream enamel, heavy serif numerals, spade hands and a seconds sub-dial.
   - **Railroad night**: the railroad dial inverted to black, the easiest on an AMOLED battery.
-- **Buttons only**: the watch is operated with BOOT and PWR. The touch screen, accelerometer and
-  audio chips are not used and are put to sleep at power-on to save battery.
+- **Buttons, plus touch in Settings**: the watch is operated with BOOT and PWR. Touch works
+  only while the Settings menu is open; the touch controller sleeps the rest of the time. The
+  accelerometer and audio chips are not used and are powered down to save battery.
 - **The screen stays off until woken**: press BOOT or PWR. It stays lit 10 s after the last
   button press (adjustable).
 - **Battery indicator**: twelve segments at the edge of the glass, one per hour. 12–1 is the first
