@@ -2,42 +2,19 @@
 
 #include <stdbool.h>
 #include <stdio.h>
-#include "freertos/FreeRTOS.h"
-#include "freertos/task.h"
-#include "driver/gpio.h"
 #include "esp_lcd_panel_ops.h"
 #include "esp_log.h"
 #include "esp_timer.h"
 #include "bsp/esp-bsp.h"
-#include "board.h"
 #include "display_dma.h"
 
 static const char *TAG = "lowpower";
-
-#define PIN_TOUCH_RST   ((gpio_num_t)BOARD_PIN_TOUCH_RST)
-#define PIN_SPEAKER_PA  ((gpio_num_t)BOARD_PIN_SPEAKER_PA)
-#define TOUCH_BOOT_MS   60                  /* CST9217 start-up after reset release */
-
-static bool s_touch_held;
 
 /* totals since boot, and the current screen-off period */
 static int64_t s_off_start_us, s_sleep_start_us;
 static int64_t s_off_us, s_sleep_us;                 /* current period */
 static int64_t s_tot_off_us, s_tot_sleep_us;
 static uint32_t s_sleeps, s_rejected, s_tot_sleeps, s_tot_rejected;
-
-void lowpower_init(void)
-{
-    gpio_config_t pa = {
-        .pin_bit_mask = BIT64(PIN_SPEAKER_PA),
-        .mode = GPIO_MODE_OUTPUT,
-        .pull_down_en = GPIO_PULLDOWN_ENABLE,
-    };
-    gpio_config(&pa);
-    gpio_set_level(PIN_SPEAKER_PA, 0);
-    gpio_hold_en(PIN_SPEAKER_PA);                       /* stays low, including in light sleep */
-    ESP_LOGI(TAG, "speaker amplifier held off");
-}
 
 static void panel_on_off(bool on)
 {
@@ -60,21 +37,10 @@ static void panel_on_off(bool on)
 void lowpower_screen_off(void)
 {
     panel_on_off(false);
-#if BOARD_TOUCH_SLEEP_RESET
-    gpio_set_level(PIN_TOUCH_RST, 0);
-    gpio_hold_en(PIN_TOUCH_RST);
-    s_touch_held = true;
-#endif
 }
 
 void lowpower_screen_on(void)
 {
-    if (s_touch_held) {
-        gpio_hold_dis(PIN_TOUCH_RST);
-        gpio_set_level(PIN_TOUCH_RST, 1);
-        s_touch_held = false;
-        vTaskDelay(pdMS_TO_TICKS(TOUCH_BOOT_MS));
-    }
     panel_on_off(true);
 }
 

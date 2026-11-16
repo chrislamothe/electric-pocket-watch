@@ -1,8 +1,7 @@
 dependencies:
   idf: ">=5.5.0"
-  # Display and touch drivers used by Waveshare's own 2.06 board package and factory firmware.
+  # Display driver used by Waveshare's own 2.06 board package and factory firmware.
   waveshare/esp_lcd_sh8601: "2.0.0"
-  espressif/esp_lcd_touch_ft5x06: "^1"
   espressif/esp_lvgl_adapter:
     version: "0.6.4"
     public: true

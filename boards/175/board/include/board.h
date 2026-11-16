@@ -13,8 +13,8 @@
  * - LCD reset GPIO39, touch reset GPIO40 (1.75C: GPIO1 / GPIO2); handled by the board package.
  * - The PWR state (SYS_OUT) is on TCA9554 P4, not on a GPIO, and the TCA9554 INT output is not
  *   connected to the ESP32. PWR therefore cannot wake light sleep directly: while the screen is
- *   off the watch wakes every BOARD_PWR_POLL_MS to read it. BOOT and double-tap wake as usual.
- * - QMI8658 INT1 goes to TCA9554 P6; INT2 goes straight to GPIO21, so wake-on-motion uses INT2.
+ *   off the watch wakes every BOARD_PWR_POLL_MS to read it. BOOT wakes it directly.
+ * - QMI8658 INT1 goes to TCA9554 P6; INT2 goes straight to GPIO21 (the accelerometer is unused).
  * - PCF85063 RTC at 0x51, kept running from the AXP2101 RTC supply.
  */
 #define BOARD_ID              "175"
@@ -24,10 +24,11 @@
 #define BOARD_PIN_BOOT        0     /* active low, 10K pull-up */
 #define BOARD_PIN_PWR         -1    /* SYS_OUT on TCA9554 P4 */
 #define BOARD_PWR_POLL_MS     200
-#define BOARD_PIN_IMU_INT     21    /* QMI8658 INT2 */
-#define BOARD_IMU_INT         2
+#define BOARD_PIN_IMU_INT     21    /* QMI8658 INT2; unused, pulled down */
 #define BOARD_PIN_TOUCH_RST   BSP_LCD_TOUCH_RST     /* GPIO40 */
-#define BOARD_TOUCH_SLEEP_RESET 1
+#define BOARD_TOUCH_CHIP      9217  /* CST9217: unused, put to sleep at boot (main/parked.c) */
+#define BOARD_TOUCH_ADDR      0x5A
+#define BOARD_TOUCH_BOOT_MS   60
 #define BOARD_PIN_SPEAKER_PA  BSP_POWER_AMP_IO      /* GPIO46 */
 #define BOARD_PIN_MOTOR       -1
 

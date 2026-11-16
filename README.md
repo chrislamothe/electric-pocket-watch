@@ -18,19 +18,22 @@ dials, screen off until you wake it, Wi-Fi only for setting the clock. Supported
   - **Calendar**: triple calendar with a moon phase. It has day and month windows, a 1–31 date ring read by a brass pointer, a live moon-phase window at 6 and a red seconds hand.
   - **Railroad**: cream enamel, heavy serif numerals, spade hands and a seconds sub-dial.
   - **Railroad night**: the railroad dial inverted to black, the easiest on an AMOLED battery.
-- **The screen stays off until woken**: press BOOT or PWR, or double-tap the case. It stays lit
-  10 s after the last touch (adjustable).
+- **Buttons only**: the watch is operated with BOOT and PWR. The touch screen, accelerometer and
+  audio chips are not used and are put to sleep at power-on to save battery.
+- **The screen stays off until woken**: press BOOT or PWR. It stays lit 10 s after the last
+  button press (adjustable).
 - **Battery indicator**: twelve segments at the edge of the glass, one per hour. 12–1 is the first
   segment and 11–12 the last, so a full battery lights all twelve. When only 12–1 and 1–2 are left
   (about 17 % or less) they turn red. While charging the segments are blue; a full green ring means
   charging is complete.
 - **Charging**: plugging in turns the screen on, and it stays on while USB power is connected. After
-  the normal screen-on time it dims to 20 %; a touch or button press brightens it again (the first
+  the normal screen-on time it dims to 20 %; a button press brightens it again (the first
   BOOT press only brightens). PWR turns it off as usual. Can be turned off in Display settings.
 - **Time sync over Wi-Fi**: the watch syncs once at power-on and whenever you ask. It uses your saved
   network, or an open network if allowed. Wi-Fi is off the rest of the time.
-- **Settings on the watch**: Wi-Fi setup with a network list and on-screen keyboard, live Wi-Fi
-  status, brightness, screen-on time, battery indicator, restart and factory reset.
+- **Settings on the watch**: double-press BOOT; press BOOT to move the highlight, hold it to
+  select. Live Wi-Fi status, brightness, screen-on time, battery indicator, restart and factory
+  reset. The Wi-Fi network itself is saved from the install web page over USB.
 - **Recovers from hangs**: a watchdog reboots the watch if the firmware ever locks up.
 
 ## Hardware
@@ -42,7 +45,7 @@ dials, screen off until you wake it, Wi-Fi only for setting the clock. Supported
 | ESP32-S3-Touch-AMOLED-2.06 (`206`) | 2.06" 410×502 rectangle, CO5300 | FT3168 | PCF85063 | Built from Waveshare's schematic and factory firmware; not yet tested on hardware |
 
 All three: ESP32-S3R8 (8 MB octal PSRAM; the firmware uses 16 MB of flash), AXP2101 PMIC
-(battery voltage, USB detect, software power-off), QMI8658 IMU (wake-on-motion for double-tap).
+(battery voltage, USB detect, software power-off), QMI8658 IMU (not used; powered down).
 The 1.75-B is the standard 1.75 in a protective case and runs the `175` firmware; the 1.75-G
 (GNSS) does too, without using its GPS. Each board needs its own firmware. On the 2.06 the round
 dials are drawn in the 410×410 square centred on the screen.
@@ -90,28 +93,26 @@ esptool.py --chip esp32s3 -p COM3 -b 460800 write_flash 0x0 fw/firmware-206.bin
 
 | Action | Result |
 |---|---|
+| **BOOT** or **PWR** press (screen off) | Wake |
 | **BOOT** press (screen on) | Next face (single press is read after ~0.35 s, to allow a double press) |
 | **BOOT** double press | Open or close Settings |
 | **BOOT** hold ~1 s | Sync the time now |
-| **PWR** press | Screen off / on |
+| In Settings: **BOOT** press / hold | Highlight the next item / select it |
+| **PWR** press | Screen off |
 | **PWR** hold 3 s | Power off ("Hold to power off", then "Powering off"). Press PWR or plug in USB to power on. |
-| Swipe left / right | Next / previous face |
-| Swipe up | Open Settings |
-| Double-tap the case (screen off) | Wake |
 
 ### Settings
 
 - **Wi-Fi**
   - Live status: radio state, saved network, last sync time and result.
-  - **Choose network**: scan, tap a network, type the password.
   - **Set time now**
   - **Use open Wi-Fi**: on by default.
   - **Forget network**
-- **Display**: brightness slider (5–100 %), screen-on time (5 / 10 / 20 / 30 s / always), on while
+- **Display**: brightness (20 / 40 / 60 / 80 / 100 %), screen-on time (5 / 10 / 20 / 30 s / always), on while
   charging (default on), battery indicator on/off.
-- **System**: version, battery, **Restart**, **Factory reset** (tap twice).
+- **System**: version, battery, **Restart**, **Factory reset** (select twice).
 
-Wi-Fi can also be changed from the install page: **Connect watch → Change Wi-Fi**.
+The Wi-Fi network is set from the install page over USB: **Connect watch → Change Wi-Fi**.
 
 ### Time
 
@@ -148,9 +149,6 @@ Useful `idf.py menuconfig` options are under **Electric Pocket Watch**:
 |---|---|---|
 | `WATCH_AWAKE_MS` | 10000 | Default screen-on time (Settings overrides it) |
 | `WATCH_SLEEP_ON_USB` | n | With USB power the watch idles instead of light-sleeping, so the serial log stays up |
-| `WATCH_WOM_THRESHOLD_MG` | 200 | Wake-on-motion threshold |
-| `WATCH_TAP_THRESHOLD_MG` | 600 | Second-tap peak for double-tap wake |
-| `WATCH_TAP_WINDOW_MS` | 700 | Window for the second tap |
 
 ### Project layout
 
@@ -170,7 +168,9 @@ main/
   display_dma.c     preallocated strip buffer for display transfers
   splash.c          boot screen, "Battery empty" message
   ext_rtc.c         PCF85063 clock chip (1.75 / 1.75-B, 2.06)
-  imu.c axp.c buttons.c settings.c watch_time.c i2c_dev.c
+  display.c         panel + LVGL start-up without a touch input device
+  parked.c          powers down the unused touch, accelerometer and audio chips
+  axp.c buttons.c settings.c watch_time.c i2c_dev.c
   fonts/            Abril Fatface digits for the railroad dials (generated with lv_font_conv)
 site/               ESP Web Tools install page and manifest
 tools/wifi.py       command-line Improv client, for debugging
@@ -190,10 +190,9 @@ tools/wifi.py       command-line Improv client, for debugging
 | Other | | RTC INT on TCA9554 P3 | vibration motor GPIO18, RTC INT GPIO39 |
 | AXP2101 IRQ | not routed | TCA9554 P5 | not routed |
 
-- The QMI8658 keeps power across ESP32 resets and is soft-reset on every mode change. Accelerometer
-  data freezes after leaving wake-on-motion without a reset.
+- The QMI8658 keeps power across ESP32 resets, so it is soft-reset before being powered down.
 - Light sleep uses per-pin GPIO wake, which allows the mixed polarity of the wake pins (BOOT low,
-  PWR high, IMU on change).
+  PWR high).
 - **Display memory**: Waveshare's BSP streams the PSRAM draw buffers to the panel through
   ~46 KB internal-RAM bounce buffers. Wi-Fi/lwIP buffers are moved to PSRAM and 128 KB of internal
   RAM is reserved. The SPI driver used to allocate a fresh internal-RAM copy for every strip;
@@ -210,18 +209,17 @@ tools/wifi.py       command-line Improv client, for debugging
   LiPo shape) until measured, so expect a few points of error there. Below 3.35 V the watch shows "Battery empty" and powers
   itself off; USB or the PWR key turns it on again. The screen-off drain is still about 14 % of the
   screen-on drain, far above what light sleep should cost: work in progress.
-- **Screen-off power** (v0.9.0): while the screen is off the display panel is switched off
-  (DISPOFF), the touch controller is held in reset, and the speaker amplifier enable is latched
-  low; the audio codecs are never powered up. Settings > System shows how much of the screen-off
-  time was spent in light sleep.
+- **Unused hardware** (v0.11.0): at power-on the touch controller is sent its sleep command, the
+  accelerometer and both audio chips are powered down over I2C, and the speaker amplifier is
+  held off (`main/parked.c`). No pin is latched. Battery effect not yet measured.
+- **Screen-off power**: while the screen is off the display panel is switched off (DISPOFF) and
+  the processor is in light sleep until BOOT or PWR. Settings > System shows how much of the
+  screen-off time was spent in light sleep.
 - **Battery log**: Settings > System > Send log over USB prints the log as CSV (one record per
   15 min, every 2 min below 3.5 V, with reset and power-off reasons at each boot).
 - **1.75 / 1.75-B**: polling the PWR button every 200 ms while the screen is off costs some
-  standby time (not yet measured). BOOT and double-tap wake without it.
-- **2.06**: the touch controller stays powered while the screen is off (its driver's start-up
-  configuration would be lost if it were held in reset).
+  standby time (not yet measured). BOOT wakes without it.
 - Not yet measured: clock drift between syncs.
-- Double-tap sensitivity is a first tuning.
 - Planned: hinged-lid opening animation, time-zone setting, alarm with chime.
 
 ## License

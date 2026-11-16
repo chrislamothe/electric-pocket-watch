@@ -5,21 +5,17 @@
 #include <stdint.h>
 
 /*
- * Screen-off power savings for parts the watch does not need while dark.
+ * Screen-off power savings and sleep accounting.
  *
  * - Display panel: DISPOFF while dark, DISPON on wake (the frame memory is kept; no re-init). The
  *   driver's own sleep call is not used: on this board it enters deep standby, and leaving that
  *   re-runs the panel init sequence, about 1.4 s.
- * - Touch controller (CST9217 on the 1.75 boards): held in reset while dark (TP_RST low, latched
- *   through light sleep with gpio_hold). It restarts in its normal reporting mode when released.
- *   Not on the 2.06 (BOARD_TOUCH_SLEEP_RESET 0): its FT3168 needs the driver's start-up writes.
- * - Speaker amplifier: its enable pin is driven low and latched, so it can never float on. The
- *   audio codecs are never initialised and stay in their power-on reset state.
+ * - Hardware the watch never uses (touch, accelerometer, audio) is powered down once at boot by
+ *   main/parked.c, not here.
  *
  * Also counts light sleep: how much of the screen-off time was really spent asleep, and how often
  * a sleep attempt was rejected. Call with the LVGL worker paused (screen off) or not yet resumed.
  */
-void lowpower_init(void);
 void lowpower_screen_off(void);
 void lowpower_screen_on(void);
 

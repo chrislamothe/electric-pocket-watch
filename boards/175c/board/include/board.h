@@ -15,10 +15,11 @@
 #define BOARD_PIN_BOOT        0     /* active low, 10K pull-up */
 #define BOARD_PIN_PWR         3     /* SYS_OUT: high while PWR is held; -1 = not on a GPIO */
 #define BOARD_PWR_POLL_MS     0     /* PWR wakes light sleep through its GPIO */
-#define BOARD_PIN_IMU_INT     21    /* QMI8658 INT1 (INT2 not connected) */
-#define BOARD_IMU_INT         1
+#define BOARD_PIN_IMU_INT     21    /* QMI8658 INT1; unused, pulled down */
 #define BOARD_PIN_TOUCH_RST   BSP_LCD_TOUCH_RST     /* GPIO2 */
-#define BOARD_TOUCH_SLEEP_RESET 1   /* CST9217 held in reset while the screen is off */
+#define BOARD_TOUCH_CHIP      9217  /* CST9217: unused, put to sleep at boot (main/parked.c) */
+#define BOARD_TOUCH_ADDR      0x5A
+#define BOARD_TOUCH_BOOT_MS   60    /* after the reset pulse, before it takes commands */
 #define BOARD_PIN_SPEAKER_PA  BSP_POWER_AMP_IO      /* GPIO46 */
 #define BOARD_PIN_MOTOR       -1
 

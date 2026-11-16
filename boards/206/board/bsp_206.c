@@ -6,10 +6,9 @@
  *   package in Waveshare's 2.06 factory firmware (examples/factory/components/
  *   waveshare__esp32_s3_touch_amoled_2_06). The registry package v2.0.0 registers this QSPI panel
  *   through esp_lvgl_port's RGB path, which the factory copy replaced; this file avoids both.
- * - Touch (FT3168 via the FT5x06 driver, no axis swap or mirroring) from the same package.
- * - LVGL through esp_lvgl_adapter exactly as the 1.75C package does (50-line PSRAM strips,
- *   double buffered, even-aligned areas), so the firmware's display path (display_dma.c,
- *   pause/resume around light sleep) is identical on every board.
+ * - Same bsp_display_new() / brightness / lock calls as Waveshare's 1.75 packages, so
+ *   main/display.c brings LVGL up identically on every board. The touch controller (FT3168) is
+ *   not used: main/parked.c puts it to sleep.
  */
 
 #include "bsp/esp-bsp.h"
@@ -19,7 +18,6 @@
 #include "esp_lcd_panel_io.h"
 #include "esp_lcd_panel_ops.h"
 #include "esp_lcd_sh8601.h"
-#include "esp_lcd_touch_ft5x06.h"
 #include "esp_log.h"
 
 static const char *TAG = "bsp_206";
@@ -27,8 +25,6 @@ static const char *TAG = "bsp_206";
 static i2c_master_bus_handle_t s_i2c;
 static esp_lcd_panel_handle_t s_panel;
 static esp_lcd_panel_io_handle_t s_io;
-static esp_lcd_touch_handle_t s_tp;
-static lv_indev_t *s_indev;
 
 /* Waveshare factory firmware sequence. Brightness (0x51) stays 0 until the application has drawn
  * its first frame. */
@@ -78,11 +74,13 @@ esp_err_t bsp_display_brightness_set(int brightness_percent)
     return esp_lcd_panel_io_tx_param(s_io, (int)cmd, &v, 1);
 }
 
-static esp_err_t panel_new(void)
+esp_err_t bsp_display_new(const bsp_display_config_t *config, esp_lcd_panel_handle_t *ret_panel,
+                          esp_lcd_panel_io_handle_t *ret_io)
 {
+    ESP_RETURN_ON_FALSE(config && config->max_transfer_sz > 0, ESP_ERR_INVALID_ARG, TAG, "config");
     const spi_bus_config_t bus = SH8601_PANEL_BUS_QSPI_CONFIG(BSP_LCD_PCLK, BSP_LCD_DATA0, BSP_LCD_DATA1,
                                                               BSP_LCD_DATA2, BSP_LCD_DATA3,
-                                                              BSP_LCD_H_RES * BSP_LCD_V_RES * BSP_LCD_BITS_PER_PIXEL / 8);
+                                                              config->max_transfer_sz);
     ESP_RETURN_ON_ERROR(spi_bus_initialize(BSP_LCD_SPI_NUM, &bus, SPI_DMA_CH_AUTO), TAG, "SPI bus");
 
     const esp_lcd_panel_io_spi_config_t io_cfg = SH8601_PANEL_IO_QSPI_CONFIG(BSP_LCD_CS, NULL, NULL);
@@ -104,90 +102,14 @@ static esp_err_t panel_new(void)
     ESP_RETURN_ON_ERROR(esp_lcd_panel_reset(s_panel), TAG, "panel reset");
     ESP_RETURN_ON_ERROR(esp_lcd_panel_init(s_panel), TAG, "panel init");
     ESP_RETURN_ON_ERROR(esp_lcd_panel_set_gap(s_panel, BSP_LCD_X_GAP, 0), TAG, "panel gap");
-    return esp_lcd_panel_disp_on_off(s_panel, true);
-}
-
-static esp_err_t touch_new(void)
-{
-    const esp_lcd_touch_config_t tp_cfg = {
-        .x_max = BSP_LCD_H_RES,
-        .y_max = BSP_LCD_V_RES,
-        .rst_gpio_num = BSP_LCD_TOUCH_RST,
-        .int_gpio_num = BSP_LCD_TOUCH_INT,
-        .levels = {.reset = 0, .interrupt = 0},
-        .flags = {.swap_xy = 0, .mirror_x = 0, .mirror_y = 0},
-    };
-    esp_lcd_panel_io_i2c_config_t io_cfg = ESP_LCD_TOUCH_IO_I2C_FT5x06_CONFIG();
-    io_cfg.scl_speed_hz = BSP_I2C_CLK_SPEED_HZ;
-    esp_lcd_panel_io_handle_t tp_io = NULL;
-    ESP_RETURN_ON_ERROR(esp_lcd_new_panel_io_i2c(s_i2c, &io_cfg, &tp_io), TAG, "touch IO");
-    return esp_lcd_touch_new_i2c_ft5x06(tp_io, &tp_cfg, &s_tp);
-}
-
-/* CO5300: window start on even, end on odd coordinates. */
-static void rounder_cb(lv_event_t *e)
-{
-    lv_area_t *a = (lv_area_t *)lv_event_get_param(e);
-    a->x1 &= ~1;
-    a->y1 &= ~1;
-    a->x2 |= 1;
-    a->y2 |= 1;
-}
-
-lv_display_t *bsp_display_start(void)
-{
-    if (bsp_i2c_init() != ESP_OK) {
-        ESP_LOGE(TAG, "I2C init failed");
-        return NULL;
+    ESP_RETURN_ON_ERROR(esp_lcd_panel_disp_on_off(s_panel, true), TAG, "panel on");
+    if (ret_panel) {
+        *ret_panel = s_panel;
     }
-    const esp_lv_adapter_config_t lv_cfg = ESP_LV_ADAPTER_DEFAULT_CONFIG();
-    if (esp_lv_adapter_init(&lv_cfg) != ESP_OK) {
-        ESP_LOGE(TAG, "LVGL adapter init failed");
-        return NULL;
+    if (ret_io) {
+        *ret_io = s_io;
     }
-    if (panel_new() != ESP_OK) {
-        return NULL;
-    }
-    esp_lv_adapter_display_config_t disp_cfg = {
-        .panel = s_panel,
-        .panel_io = s_io,
-        .profile = {
-            .interface = ESP_LV_ADAPTER_PANEL_IF_OTHER,
-            .rotation = ESP_LV_ADAPTER_ROTATE_0,
-            .hor_res = BSP_LCD_H_RES,
-            .ver_res = BSP_LCD_V_RES,
-            .buffer_height = 50,
-            .use_psram = true,
-            .enable_ppa_accel = false,
-            .require_double_buffer = true,
-        },
-        .tear_avoid_mode = ESP_LV_ADAPTER_TEAR_AVOID_MODE_NONE,
-    };
-    lv_display_t *disp = esp_lv_adapter_register_display(&disp_cfg);
-    if (!disp) {
-        ESP_LOGE(TAG, "display registration failed");
-        return NULL;
-    }
-    lv_display_add_event_cb(disp, rounder_cb, LV_EVENT_INVALIDATE_AREA, NULL);
-
-    if (touch_new() == ESP_OK) {
-        const esp_lv_adapter_touch_config_t touch_cfg = ESP_LV_ADAPTER_TOUCH_DEFAULT_CONFIG(disp, s_tp);
-        s_indev = esp_lv_adapter_register_touch(&touch_cfg);
-    }
-    if (!s_indev) {
-        ESP_LOGE(TAG, "touch not available");       /* buttons still work */
-    }
-    if (esp_lv_adapter_start() != ESP_OK) {
-        ESP_LOGE(TAG, "LVGL adapter start failed");
-        return NULL;
-    }
-    ESP_LOGI(TAG, "display %dx%d ready", BSP_LCD_H_RES, BSP_LCD_V_RES);
-    return disp;
-}
-
-lv_indev_t *bsp_display_get_input_dev(void)
-{
-    return s_indev;
+    return ESP_OK;
 }
 
 esp_err_t bsp_display_lock(uint32_t timeout_ms)

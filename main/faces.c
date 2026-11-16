@@ -6,7 +6,6 @@
 #include "axp.h"
 #include "bsp/esp-bsp.h"
 #include "settings.h"
-#include "settings_ui.h"
 #include "watch_time.h"
 
 static const char *TAG = "faces";
@@ -153,7 +152,7 @@ static void batt_create(void)
         }
         lv_obj_t *o = lv_obj_create(lv_screen_active());
         lv_obj_remove_style_all(o);
-        lv_obj_remove_flag(o, LV_OBJ_FLAG_CLICKABLE | LV_OBJ_FLAG_SCROLLABLE);   /* touches go to the face */
+        lv_obj_remove_flag(o, LV_OBJ_FLAG_CLICKABLE | LV_OBJ_FLAG_SCROLLABLE);   /* decoration only */
         lv_obj_set_pos(o, (int)minx - 2, (int)miny - 2);
         lv_obj_set_size(o, (int)(maxx - minx) + 5, (int)(maxy - miny) + 5);
         lv_obj_add_event_cb(o, seg_draw_cb, LV_EVENT_DRAW_MAIN, (void *)(intptr_t)i);
@@ -182,7 +181,6 @@ static void timer_cb(lv_timer_t *t)
     tick(false);
 }
 
-static void gesture_cb(lv_event_t *e);
 static lv_obj_t *s_status = NULL;
 static lv_timer_t *s_status_timer = NULL;
 
@@ -193,7 +191,6 @@ static void build_current(void)
         s_root = NULL;
     }
     s_root = s_faces[s_index]->create(lv_screen_active(), 0);
-    lv_obj_add_event_cb(s_root, gesture_cb, LV_EVENT_GESTURE, NULL);
     ESP_LOGI(TAG, "face '%s'", s_faces[s_index]->name);
     tick(true);
     if (s_seg[0]) {
@@ -209,35 +206,6 @@ static void select_face(int step)
     s_index = (s_index + step + FACE_COUNT) % FACE_COUNT;
     build_current();
     settings_set_int("face", s_index);
-}
-
-static void async_step(void *arg)
-{
-    select_face((int)(intptr_t)arg);
-}
-
-static void open_settings_cb(void *arg)
-{
-    (void)arg;
-    settings_ui_open_nolock();
-}
-
-static void gesture_cb(lv_event_t *e)
-{
-    (void)e;
-    lv_indev_t *indev = lv_indev_active();
-    if (!indev) {
-        return;
-    }
-    lv_dir_t dir = lv_indev_get_gesture_dir(indev);
-    if (dir == LV_DIR_TOP) {
-        lv_async_call(open_settings_cb, NULL);
-        return;
-    }
-    if (dir == LV_DIR_LEFT || dir == LV_DIR_RIGHT) {
-        /* Deleting the face from inside its own event callback is unsafe: defer. */
-        lv_async_call(async_step, (void *)(intptr_t)(dir == LV_DIR_LEFT ? 1 : -1));
-    }
 }
 
 void faces_dial_geometry(int *size, int *x, int *y)

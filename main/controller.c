@@ -14,7 +14,6 @@
 #include "battlog.h"
 #include "buttons.h"
 #include "faces.h"
-#include "imu.h"
 #include "net.h"
 #include "settings.h"
 #include "settings_ui.h"
@@ -23,15 +22,14 @@
 
 static const char *TAG = "ctl";
 
-typedef enum { WAKE_NONE = 0, WAKE_BOOT, WAKE_PWR, WAKE_IMU } wake_src_t;
+typedef enum { WAKE_NONE = 0, WAKE_BOOT, WAKE_PWR } wake_src_t;
 
 static bool s_screen_on = false;
 static uint32_t s_awake_ms = CONFIG_WATCH_AWAKE_MS;
 static bool s_lvgl_paused = false;
-static int s_imu_idle_level = 0;     /* INT1 level after arming; a change from it = motion */
 
 /* While charging (setting "chg_on", default on) the screen does not time out: after the normal
- * screen-on time it dims to CHARGE_DIM_PCT and stays on; a touch or button brings it back to full
+ * screen-on time it dims to CHARGE_DIM_PCT and stays on; a button press brings it back to full
  * brightness. Plugging in also turns the screen on. PWR still turns it off. */
 #define CHARGE_DIM_PCT 20
 static bool s_vbus;                  /* USB power, as last seen */
@@ -132,9 +130,8 @@ static void screen_on(const char *why)
     ESP_LOGI(TAG, "screen ON (%s), battery %d%%, VBUS %d, internal DMA free %u (largest %u)", why, pct,
              axp_vbus_good(), (unsigned)heap_caps_get_free_size(MALLOC_CAP_INTERNAL | MALLOC_CAP_DMA),
              (unsigned)heap_caps_get_largest_free_block(MALLOC_CAP_INTERNAL | MALLOC_CAP_DMA));
-    imu_off();
     lowpower_off_end();
-    lowpower_screen_on();                            /* touch out of reset, panel DISPON */
+    lowpower_screen_on();                            /* panel DISPON */
     if (s_lvgl_paused) {
         esp_lv_adapter_resume();                     /* restart the LVGL worker and its tick */
         s_lvgl_paused = false;
@@ -163,7 +160,7 @@ static void screen_off(const char *why)
     } else {
         ESP_LOGW(TAG, "LVGL pause timed out");
     }
-    lowpower_screen_off();                           /* panel DISPOFF, touch held in reset */
+    lowpower_screen_off();                           /* panel DISPOFF */
     lowpower_off_begin();
     s_screen_on = false;
 }
@@ -247,8 +244,7 @@ static void run_screen_on(void)
                 ESP_LOGI(TAG, "BOOT short: undim");      /* first press only brightens */
                 restore_from_dim();
             } else if (settings_ui_is_open()) {
-                ESP_LOGI(TAG, "BOOT short: close settings");
-                settings_ui_close();
+                settings_ui_next();                      /* move the highlight */
             } else {
                 ESP_LOGI(TAG, "BOOT short: next face");
                 faces_next();
@@ -262,6 +258,13 @@ static void run_screen_on(void)
             break;
         case BTN_BOOT_LONG:
         {
+            restore_from_dim();
+            if (settings_ui_is_open()) {
+                settings_ui_select();                    /* activate the highlighted item */
+                buttons_sync_and_consume();
+                touch_activity();
+                break;
+            }
             ESP_LOGI(TAG, "BOOT long: Wi-Fi time sync");
             faces_show_status("Syncing time...", 0);
             net_result_t r = net_sync_time();
@@ -297,7 +300,10 @@ static void run_screen_on(void)
                 }
             }
             if (((n / 20) % 25) == 0) {
-                s_chg_on = settings_get_int("chg_on", 1) != 0;   /* every ~5 s: follows the setting */
+                s_chg_on = settings_get_int("chg_on", 1) != 0;   /* every ~5 s: follows the settings */
+                if (!s_dimmed) {
+                    s_bright = settings_get_int("bright", CONFIG_WATCH_BRIGHTNESS);
+                }
             }
             bool was_usb = s_vbus;
             vbus_poll();
@@ -314,7 +320,7 @@ static void run_screen_on(void)
                     set_brightness(s_bright < CHARGE_DIM_PCT ? s_bright : CHARGE_DIM_PCT);
                     s_dimmed = true;
                 } else if (!timed_out && s_dimmed) {
-                    restore_from_dim();              /* touched */
+                    restore_from_dim();              /* button pressed */
                 }
             } else if (timed_out) {
                 restore_from_dim();
@@ -336,9 +342,6 @@ static wake_src_t wake_pins(void)
     if (buttons_pwr_down_raw()) {
         return WAKE_PWR;
     }
-    if (gpio_get_level(PIN_IMU_INT1) != s_imu_idle_level) {
-        return WAKE_IMU;
-    }
     return WAKE_NONE;
 }
 
@@ -349,22 +352,7 @@ static void wait_buttons_released(int max_ms)
     }
 }
 
-/* Settle, arm wake-on-motion, then record INT1's idle level. The v0.0.8 log showed INT1 at both
- * levels across WoM events, so it may toggle rather than pulse: the wake is armed on the level
- * opposite to the recorded one, which catches either behaviour. */
-static void arm_for_sleep(void)
-{
-    wait_buttons_released(3000);
-    if (!imu_wait_still(300, 2000, 150)) {
-        ESP_LOGI(TAG, "not still after 2 s; arming wake-on-motion anyway");
-    }
-    imu_arm_wom(CONFIG_WATCH_WOM_THRESHOLD_MG);
-    vTaskDelay(pdMS_TO_TICKS(20));
-    s_imu_idle_level = gpio_get_level(PIN_IMU_INT1);
-    ESP_LOGI(TAG, "wake-on-motion armed, INT1 idle level %d", s_imu_idle_level);
-}
-
-/* Light sleep until one of BOOT (low), PWR (high) or the IMU interrupt fires. Per-pin wake levels
+/* Light sleep until BOOT (low) or PWR (high) is pressed. Per-pin wake levels
  * are supported by gpio_wakeup_enable() in light sleep (ESP-IDF sleep_modes docs), which is what
  * allows the mixed polarity. Where PWR is not on a GPIO (1.75 / 1.75-B: I/O expander without a
  * routed interrupt), the timer wakes the chip every BOARD_PWR_POLL_MS to read it. While USB power
@@ -385,7 +373,6 @@ static wake_src_t wait_for_wake(void)
 #if BOARD_PIN_PWR >= 0
         gpio_wakeup_enable((gpio_num_t)BOARD_PIN_PWR, GPIO_INTR_HIGH_LEVEL);
 #endif
-        gpio_wakeup_enable(PIN_IMU_INT1, s_imu_idle_level ? GPIO_INTR_LOW_LEVEL : GPIO_INTR_HIGH_LEVEL);
         esp_sleep_enable_gpio_wakeup();
         uint64_t wake_us = battlog_us_until_due();              /* battery log sample */
 #if BOARD_PWR_POLL_MS > 0
@@ -401,7 +388,6 @@ static wake_src_t wait_for_wake(void)
 #if BOARD_PIN_PWR >= 0
         gpio_wakeup_disable((gpio_num_t)BOARD_PIN_PWR);
 #endif
-        gpio_wakeup_disable(PIN_IMU_INT1);
         if (r != ESP_OK) {
             vTaskDelay(pdMS_TO_TICKS(10));           /* rejected: a wake level was already active */
         }
@@ -420,7 +406,7 @@ static wake_src_t wait_for_wake(void)
 
 static void run_screen_off(void)
 {
-    arm_for_sleep();
+    wait_buttons_released(3000);                     /* a held button would reject every sleep */
     while (!s_screen_on) {
         wake_src_t w = wait_for_wake();
         if (vbus_poll() && settings_get_int("chg_on", 1)) {
@@ -428,26 +414,10 @@ static void run_screen_off(void)
             screen_on("USB connected");
             break;
         }
-        switch (w) {
-        case WAKE_BOOT:
-        case WAKE_PWR:
+        if (w != WAKE_NONE) {
             buttons_sync_and_consume();              /* this press only wakes the screen */
             battlog_note_wake(BATTLOG_WAKE_BUTTON);
             screen_on(w == WAKE_BOOT ? "BOOT" : "PWR");
-            break;
-        case WAKE_IMU:
-            ESP_LOGI(TAG, "motion wake");
-            if (imu_confirm_double_tap(CONFIG_WATCH_TAP_WINDOW_MS, CONFIG_WATCH_TAP_THRESHOLD_MG)) {
-                buttons_sync_and_consume();
-                battlog_note_wake(BATTLOG_WAKE_TAP);
-                screen_on("double tap");
-            } else {
-                battlog_note_wake(BATTLOG_WAKE_MOTION_REJECTED);
-                arm_for_sleep();
-            }
-            break;
-        default:
-            break;
         }
     }
 }

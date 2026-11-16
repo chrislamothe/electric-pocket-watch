@@ -17,6 +17,7 @@
 #include "driver/i2c_master.h"
 #include "lvgl.h"
 #include "esp_lv_adapter.h"
+#include "esp_lcd_types.h"
 
 #define BSP_I2C_SCL           (GPIO_NUM_14)
 #define BSP_I2C_SDA           (GPIO_NUM_15)
@@ -43,10 +44,14 @@
 esp_err_t bsp_i2c_init(void);
 i2c_master_bus_handle_t bsp_i2c_get_handle(void);
 
-/* SPI bus, panel, touch, LVGL (esp_lvgl_adapter, 50-line PSRAM strips, double buffered).
- * The panel starts dark (brightness 0) until bsp_display_brightness_set(). */
-lv_display_t *bsp_display_start(void);
-lv_indev_t *bsp_display_get_input_dev(void);
+typedef struct {
+    int max_transfer_sz;    /* largest SPI transfer, bytes */
+} bsp_display_config_t;
+
+/* SPI bus and panel only (same call as Waveshare's 1.75 packages). The panel starts dark
+ * (brightness 0) until bsp_display_brightness_set(). */
+esp_err_t bsp_display_new(const bsp_display_config_t *config, esp_lcd_panel_handle_t *ret_panel,
+                          esp_lcd_panel_io_handle_t *ret_io);
 
 esp_err_t bsp_display_lock(uint32_t timeout_ms);
 void bsp_display_unlock(void);

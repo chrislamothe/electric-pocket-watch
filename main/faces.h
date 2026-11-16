@@ -25,8 +25,7 @@ void faces_init(void);
 /* Every dial is drawn in a square of side *size (the shorter display side) whose top-left corner
  * is at (*x, *y): the whole round 466 px panel on the 1.75 boards, centred vertically on the
  * 410x502 panel of the 2.06. Faces create their root object there and size everything from
- * *size. faces_place_root() applies it to a face root (position, size, and a click area that
- * reaches the rest of the screen so swipes work anywhere). */
+ * *size. faces_place_root() applies it to a face root (position and size). */
 void faces_dial_geometry(int *size, int *x, int *y);
 void faces_place_root(lv_obj_t *root);
 void faces_next(void);

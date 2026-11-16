@@ -185,7 +185,7 @@ static lv_obj_t *create(lv_obj_t *parent, int theme, const analog_style_t *style
 
     lv_obj_t *root = lv_obj_create(parent);
     lv_obj_remove_style_all(root);
-    lv_obj_remove_flag(root, LV_OBJ_FLAG_SCROLLABLE);   /* stays clickable: receives the swipe */
+    lv_obj_remove_flag(root, LV_OBJ_FLAG_SCROLLABLE);
     faces_place_root(root);
 
     disc(root, C, C, S, t->dial, 0, 0);                 /* dial to the glass edge, no case ring */

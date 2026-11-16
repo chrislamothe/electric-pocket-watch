@@ -2,7 +2,8 @@
  * Electric Pocket Watch
  *
  * Boards: Waveshare ESP32-S3-Touch-AMOLED-1.75C, -1.75 / -1.75-B, -2.06 (boards/, selected at
- * build time with -D BOARD=...). The screen stays off until BOOT, PWR or a double tap.
+ * build time with -D BOARD=...). The screen stays off until BOOT or PWR is pressed; the watch is
+ * operated with those two buttons only (no touch, accelerometer or audio: main/parked.c).
  *
  * The bring-up/diagnostic firmware is commit 986ce41 (v0.0.8).
  */
@@ -18,10 +19,11 @@
 #include "battlog.h"
 #include "buttons.h"
 #include "controller.h"
+#include "display.h"
 #include "display_dma.h"
 #include "lowpower.h"
 #include "faces.h"
-#include "imu.h"
+#include "parked.h"
 #include "improv.h"
 #include "net.h"
 #include "ext_rtc.h"
@@ -55,17 +57,17 @@ void app_main(void)
 
     ESP_ERROR_CHECK(bsp_i2c_init());
     ESP_LOGI(TAG, "step: display start");
-    lv_display_t *disp = bsp_display_start();
+    lv_display_t *disp = display_start();
     if (!disp) {
-        ESP_LOGE(TAG, "bsp_display_start failed");
+        ESP_LOGE(TAG, "display start failed");
         return;
     }
     display_dma_init(disp);                     /* before anything else takes internal RAM */
-    lowpower_init();
     splash_show();                              /* name, version, reset reason */
 
     i2c_master_bus_handle_t bus = bsp_i2c_get_handle();
     board_init(bus);
+    parked_init(bus);                           /* touch, accelerometer, audio: asleep for good */
     if (ext_rtc_init(bus)) {
         ext_rtc_restore_system_time();              /* before the first battery-log record */
     }
@@ -78,11 +80,6 @@ void app_main(void)
         battlog_sample("boot");
         controller_check_empty_at_boot();
     }
-    ESP_LOGI(TAG, "step: IMU");
-    if (!imu_init(bus)) {
-        ESP_LOGE(TAG, "IMU not available: double-tap wake disabled");
-    }
-
     watch_time_init();
     buttons_init();
 

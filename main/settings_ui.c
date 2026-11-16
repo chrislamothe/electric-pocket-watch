@@ -1,18 +1,25 @@
 /*
- * Settings menu drawn over the face.
+ * Settings menu drawn over the face, operated with the BOOT button (the watch has no touch input):
+ *
+ *   BOOT short  = move the highlight to the next item
+ *   BOOT hold   = activate the highlighted item
+ *   BOOT double = open / close the menu
  *
  *   Settings ─┬─ Wi-Fi ─────┬─ status block (radio, saved network, last sync) - live
- *             │             ├─ Choose network ─ scan list ─ password keyboard
  *             │             ├─ Set time now
  *             │             ├─ Open Wi-Fi: On/Off
  *             │             └─ Forget network
- *             ├─ Display ───┬─ Brightness slider (live, saved on release)
- *             │             └─ Screen on: 5/10/20/30 s
- *             ├─ Theme
+ *             ├─ Display ───┬─ Brightness: 20..100 %
+ *             │             ├─ Screen on: 5/10/20/30 s / always
+ *             │             ├─ On while charging
+ *             │             └─ Battery indicator
+ *             ├─ System
  *             └─ Close
  *
+ * A Wi-Fi network is saved from the install web page over USB (Improv, main/improv.c).
+ *
  * Pages are rebuilt through lv_async_call so a button is never deleted from inside its own
- * callback. Scan/join/sync run on a worker task; results return to the LVGL thread through
+ * callback. Time sync runs on a worker task; its result returns to the LVGL thread through
  * lv_async_call under the display lock. A 1 s LVGL timer refreshes the Wi-Fi status text.
  * Content stays inside a ~320 px column so it fits the round 466 px panels (and the 410 px wide 2.06).
  */
@@ -47,42 +54,36 @@ static const char *TAG = "settings_ui";
 #define COL_BRASS   0xC9A04A
 #define COL_GOOD    0x7FB069
 #define COL_BAD     0xD9734E
-#define MAX_APS     20
 
-typedef enum { PAGE_MAIN, PAGE_WIFI, PAGE_NETWORKS, PAGE_PASSWORD, PAGE_DISPLAY, PAGE_SYSTEM } page_t;
-typedef enum { JOB_SCAN, JOB_JOIN, JOB_SYNC } job_type_t;
+typedef enum { PAGE_MAIN, PAGE_WIFI, PAGE_DISPLAY, PAGE_SYSTEM } page_t;
+typedef enum { JOB_SYNC } job_type_t;
 
 typedef struct {
     job_type_t type;
-    char ssid[33];
-    char pass[65];
 } job_t;
 
 typedef struct {
     job_type_t type;
     net_result_t result;
-    int count;
-    net_ap_t aps[MAX_APS];
 } job_result_t;
 
 static lv_obj_t *s_panel;           /* NULL when closed */
 static lv_obj_t *s_status;          /* bottom status line */
 static lv_obj_t *s_list;
-static lv_obj_t *s_ta;
 static lv_obj_t *s_wifi_info;       /* live status block on the Wi-Fi page */
 static lv_obj_t *s_wifi_sub;        /* second line of the Wi-Fi item on the main page */
-static lv_obj_t *s_bright_lbl;
 static lv_timer_t *s_refresh;
 static page_t s_page;
 static QueueHandle_t s_jobs;
 static volatile bool s_busy;
-static net_ap_t s_aps[MAX_APS];
-static int s_ap_count;
-static char s_sel_ssid[33];
+static int s_focus;                 /* index of the highlighted button on this page */
 static char s_note[64];             /* one-shot message for the next page build */
-static bool s_reset_armed;          /* factory reset needs a second tap */
+static bool s_reset_armed;          /* factory reset needs a second activation */
 
 static const int AWAKE_CHOICES[] = {5, 10, 20, 30, 0};   /* 0 = always on */
+static const int BRIGHT_CHOICES[] = {20, 40, 60, 80, 100};
+#define BRIGHT_COUNT ((int)(sizeof(BRIGHT_CHOICES) / sizeof(BRIGHT_CHOICES[0])))
+#define HINT "BOOT: next   hold: select   double: close"
 #define AWAKE_COUNT ((int)(sizeof(AWAKE_CHOICES) / sizeof(AWAKE_CHOICES[0])))
 
 static void go(page_t page);
@@ -96,10 +97,8 @@ static void forget_panel(void)
     s_panel = NULL;
     s_status = NULL;
     s_list = NULL;
-    s_ta = NULL;
     s_wifi_info = NULL;
     s_wifi_sub = NULL;
-    s_bright_lbl = NULL;
 }
 
 /* ---------------------------------------------------------------- status text */
@@ -225,7 +224,9 @@ static lv_obj_t *button(lv_obj_t *parent, int h, lv_event_cb_t cb, void *user)
     lv_obj_set_style_radius(b, h / 2, 0);
     lv_obj_set_style_bg_opa(b, LV_OPA_COVER, 0);
     lv_obj_set_style_bg_color(b, lv_color_hex(COL_ITEM), 0);
-    lv_obj_set_style_bg_color(b, lv_color_hex(COL_ITEM_PR), LV_STATE_PRESSED);
+    lv_obj_set_style_bg_color(b, lv_color_hex(COL_ITEM_PR), LV_STATE_FOCUSED);
+    lv_obj_set_style_border_color(b, lv_color_hex(COL_BRASS), LV_STATE_FOCUSED);
+    lv_obj_set_style_border_width(b, 3, LV_STATE_FOCUSED);
     lv_obj_set_style_pad_hor(b, 22, 0);
     lv_obj_remove_flag(b, LV_OBJ_FLAG_SCROLL_ON_FOCUS);
     if (cb) {
@@ -265,10 +266,8 @@ static void frame(const char *title, int list_h)
     lv_obj_clean(s_panel);
     s_status = NULL;
     s_list = NULL;
-    s_ta = NULL;
     s_wifi_info = NULL;
     s_wifi_sub = NULL;
-    s_bright_lbl = NULL;
 
     lv_obj_t *t = label(s_panel, title, &lv_font_montserrat_28, COL_BRASS);
     lv_label_set_long_mode(t, LV_LABEL_LONG_MODE_DOTS);
@@ -286,24 +285,66 @@ static void frame(const char *title, int list_h)
         lv_obj_set_scrollbar_mode(s_list, LV_SCROLLBAR_MODE_OFF);
     }
 
-    s_status = label(s_panel, s_note, &lv_font_montserrat_16, COL_DIM);
+    s_status = label(s_panel, s_note[0] ? s_note : HINT, &lv_font_montserrat_16, COL_DIM);
     s_note[0] = '\0';
     lv_obj_set_width(s_status, 260);
     lv_label_set_long_mode(s_status, LV_LABEL_LONG_MODE_WRAP);
     lv_obj_align(s_status, LV_ALIGN_BOTTOM_MID, 0, -34);
 }
 
+/* ---------------------------------------------------------------- highlight */
+
+static lv_obj_t *nth_button(int n, int *count)
+{
+    lv_obj_t *found = NULL;
+    int k = 0;
+    uint32_t total = s_list ? lv_obj_get_child_count(s_list) : 0;
+    for (uint32_t i = 0; i < total; i++) {
+        lv_obj_t *c = lv_obj_get_child(s_list, (int32_t)i);
+        if (!lv_obj_check_type(c, &lv_button_class)) {
+            continue;
+        }
+        if (k == n) {
+            found = c;
+        }
+        k++;
+    }
+    if (count) {
+        *count = k;
+    }
+    return found;
+}
+
+/* Highlight button s_focus (clamped) and scroll it into view. */
+static void apply_focus(void)
+{
+    int count = 0;
+    nth_button(0, &count);
+    if (count == 0) {
+        return;
+    }
+    if (s_focus >= count) {
+        s_focus = count - 1;
+    }
+    for (int i = 0; i < count; i++) {
+        lv_obj_t *b = nth_button(i, NULL);
+        if (i == s_focus) {
+            lv_obj_add_state(b, LV_STATE_FOCUSED);
+            if (i == 0) {
+                lv_obj_scroll_to_y(s_list, 0, LV_ANIM_OFF);     /* show the text above the first item */
+            }
+            lv_obj_scroll_to_view(b, LV_ANIM_OFF);
+        } else {
+            lv_obj_remove_state(b, LV_STATE_FOCUSED);
+        }
+    }
+}
+
 /* ---------------------------------------------------------------- worker */
 
-static void post_job(job_type_t type, const char *ssid, const char *pass)
+static void post_job(job_type_t type)
 {
     job_t j = {.type = type};
-    if (ssid) {
-        strlcpy(j.ssid, ssid, sizeof(j.ssid));
-    }
-    if (pass) {
-        strlcpy(j.pass, pass, sizeof(j.pass));
-    }
     s_busy = true;
     if (xQueueSend(s_jobs, &j, 0) != pdTRUE) {
         s_busy = false;
@@ -319,27 +360,7 @@ static void apply_result(void *arg)                     /* LVGL thread */
         free(r);
         return;
     }
-    switch (r->type) {
-    case JOB_SCAN:
-        if (s_page == PAGE_NETWORKS) {
-            s_ap_count = r->count;
-            memcpy(s_aps, r->aps, sizeof(net_ap_t) * r->count);
-            go(PAGE_NETWORKS);                              /* rebuild with the list */
-        }
-        break;
-    case JOB_JOIN:
-        if (r->result == NET_OK || r->result == NET_NTP_FAILED) {
-            snprintf(s_note, sizeof(s_note), "%s",
-                     r->result == NET_OK ? "Wi-Fi saved, time synced" : "Wi-Fi saved, time server failed");
-            go(PAGE_WIFI);
-        } else {
-            set_status("Could not join. Check the password.");
-        }
-        break;
-    case JOB_SYNC:
-        set_status(net_result_text(r->result));
-        break;
-    }
+    set_status(net_result_text(r->result));
     refresh_cb(NULL);
     free(r);
 }
@@ -357,17 +378,7 @@ static void worker(void *arg)
             continue;
         }
         r->type = j.type;
-        switch (j.type) {
-        case JOB_SCAN:
-            r->count = net_scan(r->aps, MAX_APS);
-            break;
-        case JOB_JOIN:
-            r->result = net_provision(j.ssid, j.pass);
-            break;
-        case JOB_SYNC:
-            r->result = net_sync_time();
-            break;
-        }
+        r->result = net_sync_time();
         ESP_LOGI(TAG, "job %d done", j.type);
         if (bsp_display_lock(2000) == ESP_OK) {
             lv_async_call(apply_result, r);
@@ -418,7 +429,7 @@ static void on_factory_reset(lv_event_t *e)
         s_reset_armed = true;
         lv_obj_t *l = lv_obj_get_child(btn, 0);
         if (l) {
-            lv_label_set_text(l, "Tap again to erase");
+            lv_label_set_text(l, "Select again to erase");
         }
         lv_obj_set_style_bg_color(btn, lv_color_hex(0x5A2A1E), 0);
         set_status("Erases Wi-Fi, display settings and face, then restarts");
@@ -427,7 +438,6 @@ static void on_factory_reset(lv_event_t *e)
     bsp_display_brightness_set(0);
     settings_factory_reset();
 }
-static void on_to_networks(lv_event_t *e) { (void)e; s_ap_count = -1; go(PAGE_NETWORKS); }
 
 static void on_sync(lv_event_t *e)
 {
@@ -436,7 +446,7 @@ static void on_sync(lv_event_t *e)
         return;
     }
     set_status("Syncing time...");
-    post_job(JOB_SYNC, NULL, NULL);
+    post_job(JOB_SYNC);
 }
 
 static void on_open_wifi(lv_event_t *e)
@@ -454,45 +464,18 @@ static void on_forget(lv_event_t *e)
     go(PAGE_WIFI);
 }
 
-static void on_ap(lv_event_t *e)
-{
-    int i = (int)(intptr_t)lv_event_get_user_data(e);
-    if (i < 0 || i >= s_ap_count || s_busy) {
-        return;
-    }
-    strlcpy(s_sel_ssid, s_aps[i].ssid, sizeof(s_sel_ssid));
-    if (s_aps[i].secured) {
-        go(PAGE_PASSWORD);
-    } else {
-        set_status("Joining...");
-        post_job(JOB_JOIN, s_sel_ssid, "");
-    }
-}
-
-static void on_keyboard(lv_event_t *e)
-{
-    lv_event_code_t code = lv_event_get_code(e);
-    if (code == LV_EVENT_CANCEL) {
-        s_ap_count = -1;
-        go(PAGE_NETWORKS);
-    } else if (code == LV_EVENT_READY && s_ta && !s_busy) {
-        set_status("Joining...");
-        post_job(JOB_JOIN, s_sel_ssid, lv_textarea_get_text(s_ta));
-    }
-}
-
 static void on_brightness(lv_event_t *e)
 {
-    lv_obj_t *sl = lv_event_get_target_obj(e);
-    int v = (int)lv_slider_get_value(sl);
-    if (lv_event_get_code(e) == LV_EVENT_VALUE_CHANGED) {
-        bsp_display_brightness_set(v);                  /* live preview */
-        if (s_bright_lbl) {
-            lv_label_set_text_fmt(s_bright_lbl, "Brightness %d%%", v);
-        }
-    } else {                                            /* released: save once */
-        settings_set_int("bright", v);
+    (void)e;
+    int cur = settings_get_int("bright", CONFIG_WATCH_BRIGHTNESS);
+    int i = 0;
+    while (i < BRIGHT_COUNT && BRIGHT_CHOICES[i] <= cur) {      /* next step above the current value */
+        i++;
     }
+    int v = BRIGHT_CHOICES[i % BRIGHT_COUNT];
+    settings_set_int("bright", v);
+    bsp_display_brightness_set(v);
+    go(PAGE_DISPLAY);
 }
 
 static void on_batt_ring(lv_event_t *e)
@@ -540,6 +523,7 @@ static void build_main(void)
 
 static void build_wifi(void)
 {
+    bool note = s_note[0] != '\0';
     frame("Wi-Fi", 320);
     char buf[200];
     wifi_details(buf, sizeof(buf));
@@ -548,7 +532,6 @@ static void build_wifi(void)
     lv_label_set_long_mode(s_wifi_info, LV_LABEL_LONG_MODE_WRAP);
     lv_obj_set_style_pad_ver(s_wifi_info, 4, 0);
 
-    item(s_list, "Choose network", on_to_networks, NULL);
     item(s_list, "Set time now", on_sync, NULL);
     char txt[40];
     snprintf(txt, sizeof(txt), "Use open Wi-Fi: %s", settings_get_int("open_wifi", 1) ? "On" : "Off");
@@ -558,76 +541,17 @@ static void build_wifi(void)
         item(s_list, "Forget network", on_forget, NULL);
     }
     item(s_list, "Back", on_to_main, NULL);
-}
-
-static void build_networks(void)
-{
-    frame("Networks", 320);
-    if (s_ap_count < 0) {                               /* start a scan */
-        set_status("Scanning...");
-        item(s_list, "Back", on_to_wifi, NULL);
-        post_job(JOB_SCAN, NULL, NULL);
-        return;
+    if (!note && !settings_get_str("ssid", ssid, sizeof(ssid))) {
+        set_status("Save a network from the install web page (USB)");
     }
-    for (int i = 0; i < s_ap_count; i++) {
-        char txt[48];
-        snprintf(txt, sizeof(txt), "%s%s", s_aps[i].ssid, s_aps[i].secured ? "" : "  (open)");
-        item(s_list, txt, on_ap, (void *)(intptr_t)i);
-    }
-    item(s_list, "Scan again", on_to_networks, NULL);
-    item(s_list, "Back", on_to_wifi, NULL);
-    set_status(s_ap_count ? "Tap a network" : "No networks found");
-}
-
-static void build_password(void)
-{
-    frame(s_sel_ssid, 0);
-
-    s_ta = lv_textarea_create(s_panel);
-    lv_textarea_set_one_line(s_ta, true);
-    lv_textarea_set_password_mode(s_ta, true);
-    lv_textarea_set_max_length(s_ta, 64);
-    lv_textarea_set_placeholder_text(s_ta, "Password");
-    lv_obj_set_width(s_ta, 300);
-    lv_obj_set_style_text_font(s_ta, &lv_font_montserrat_28, 0);
-    lv_obj_align(s_ta, LV_ALIGN_TOP_MID, 0, 96);
-
-    lv_obj_t *kb = lv_keyboard_create(s_panel);
-    lv_keyboard_set_textarea(kb, s_ta);
-    lv_keyboard_set_popovers(kb, true);
-    lv_obj_set_size(kb, 316, 196);
-    lv_obj_align(kb, LV_ALIGN_TOP_MID, 0, 170);
-    lv_obj_add_event_cb(kb, on_keyboard, LV_EVENT_READY, NULL);
-    lv_obj_add_event_cb(kb, on_keyboard, LV_EVENT_CANCEL, NULL);
-
-    lv_obj_align(s_status, LV_ALIGN_BOTTOM_MID, 0, -52);
-    set_status("OK key joins, keyboard key goes back");
 }
 
 static void build_display(void)
 {
     frame("Display", 320);
-    int b = settings_get_int("bright", CONFIG_WATCH_BRIGHTNESS);
-
-    s_bright_lbl = label(s_list, "", &lv_font_montserrat_28, COL_TEXT);
-    lv_obj_set_width(s_bright_lbl, lv_pct(100));
-    lv_label_set_text_fmt(s_bright_lbl, "Brightness %d%%", b);
-
-    lv_obj_t *holder = lv_obj_create(s_list);           /* padding so the knob is easy to grab */
-    lv_obj_remove_style_all(holder);
-    lv_obj_set_size(holder, lv_pct(100), 56);
-    lv_obj_remove_flag(holder, LV_OBJ_FLAG_SCROLLABLE);
-    lv_obj_t *sl = lv_slider_create(holder);
-    lv_slider_set_range(sl, 5, 100);
-    lv_slider_set_value(sl, b, LV_ANIM_OFF);
-    lv_obj_set_width(sl, 260);
-    lv_obj_center(sl);
-    lv_obj_set_style_bg_color(sl, lv_color_hex(COL_BRASS), LV_PART_INDICATOR);
-    lv_obj_set_style_bg_color(sl, lv_color_hex(COL_BRASS), LV_PART_KNOB);
-    lv_obj_add_event_cb(sl, on_brightness, LV_EVENT_VALUE_CHANGED, NULL);
-    lv_obj_add_event_cb(sl, on_brightness, LV_EVENT_RELEASED, NULL);
-
     char txt[32];
+    snprintf(txt, sizeof(txt), "Brightness: %d%%", settings_get_int("bright", CONFIG_WATCH_BRIGHTNESS));
+    item(s_list, txt, on_brightness, NULL);
     int awake = settings_get_int("awake_s", CONFIG_WATCH_AWAKE_MS / 1000);
     if (awake > 0) {
         snprintf(txt, sizeof(txt), "Screen on: %d s", awake);
@@ -668,15 +592,18 @@ static void build_cb(void *arg)
     if (!s_panel) {
         return;
     }
-    s_page = (page_t)(intptr_t)arg;
+    page_t page = (page_t)(intptr_t)arg;
+    if (page != s_page) {
+        s_focus = 0;                                    /* same page rebuilt: keep the highlight */
+    }
+    s_page = page;
     switch (s_page) {
     case PAGE_MAIN:     build_main(); break;
     case PAGE_WIFI:     build_wifi(); break;
-    case PAGE_NETWORKS: build_networks(); break;
-    case PAGE_PASSWORD: build_password(); break;
     case PAGE_DISPLAY:  build_display(); break;
     case PAGE_SYSTEM:   build_system(); break;
     }
+    apply_focus();
 }
 
 static void go(page_t page)
@@ -706,7 +633,9 @@ void settings_ui_open_nolock(void)
     lv_obj_move_foreground(s_panel);
     s_note[0] = '\0';
     s_page = PAGE_MAIN;
+    s_focus = 0;
     build_main();
+    apply_focus();
     s_refresh = lv_timer_create(refresh_cb, 1000, NULL);
 }
 
@@ -732,6 +661,32 @@ void settings_ui_close(void)
     if (s_panel) {
         lv_obj_delete(s_panel);
         forget_panel();
+    }
+    bsp_display_unlock();
+}
+
+void settings_ui_next(void)
+{
+    if (!s_panel || bsp_display_lock(1000) != ESP_OK) {
+        return;
+    }
+    int count = 0;
+    nth_button(0, &count);
+    if (s_panel && count > 0) {
+        s_focus = (s_focus + 1) % count;
+        apply_focus();
+    }
+    bsp_display_unlock();
+}
+
+void settings_ui_select(void)
+{
+    if (!s_panel || bsp_display_lock(1000) != ESP_OK) {
+        return;
+    }
+    lv_obj_t *b = s_panel ? nth_button(s_focus, NULL) : NULL;
+    if (b) {
+        lv_obj_send_event(b, LV_EVENT_CLICKED, NULL);
     }
     bsp_display_unlock();
 }
