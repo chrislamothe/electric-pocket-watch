@@ -33,9 +33,9 @@
   <p class="sub">Firmware for Waveshare ESP32-S3 AMOLED boards</p>
 
   <div class="card">
-    <h2>Stable: version __STABLE__ (1.75C only)</h2>
+    <h2>Stable: version <span id="v-stable">__STABLE__</span> (1.75C only)</h2>
     <p class="dim">The last version confirmed working on a real ESP32-S3-Touch-AMOLED-1.75C. Use this unless you are testing.</p>
-    <esp-web-install-button manifest="manifest-stable.json">
+    <esp-web-install-button data-manifest="manifest-stable.json">
       <button slot="activate">Connect 1.75C (stable)</button>
       <span slot="unsupported" class="warn">This browser can't talk to USB devices. Use Chrome or Edge on a computer.</span>
       <span slot="not-allowed" class="warn">This page must be opened over https.</span>
@@ -44,14 +44,14 @@
   </div>
 
   <div class="card">
-    <h2>Test builds: version __VERSION__</h2>
+    <h2>Test builds: version <span id="v-test">__VERSION__</span></h2>
     <p class="dim warn">Not yet confirmed on hardware. They may not work; the stable button above always restores a 1.75C.</p>
     <p class="dim">Pick your board. The model is printed on the box label (for example <i>ESP32-S3-Touch-AMOLED-1.75C-EN</i>). Each board needs its own firmware.</p>
     <div class="boards">
       <div class="board">
         <b>ESP32-S3-Touch-AMOLED-1.75C</b>
         <p class="dim">1.75&Prime; round, aluminium case</p>
-        <esp-web-install-button manifest="manifest-175c.json">
+        <esp-web-install-button data-manifest="manifest-175c.json">
           <button slot="activate">Connect 1.75C (test)</button>
           <span slot="unsupported" class="warn">This browser can't talk to USB devices. Use Chrome or Edge on a computer.</span>
           <span slot="not-allowed" class="warn">This page must be opened over https.</span>
@@ -60,7 +60,7 @@
       <div class="board">
         <b>ESP32-S3-Touch-AMOLED-1.75 / 1.75-B</b>
         <p class="dim">1.75&Prime; round, bare board or with protective case (SKU 31261 / 31262)</p>
-        <esp-web-install-button manifest="manifest-175.json">
+        <esp-web-install-button data-manifest="manifest-175.json">
           <button slot="activate">Connect 1.75 / 1.75-B (test)</button>
           <span slot="unsupported" class="warn">This browser can't talk to USB devices. Use Chrome or Edge on a computer.</span>
           <span slot="not-allowed" class="warn">This page must be opened over https.</span>
@@ -69,7 +69,7 @@
       <div class="board">
         <b>ESP32-S3-Touch-AMOLED-2.06</b>
         <p class="dim">2.06&Prime; rectangular watch board (SKU 31957)</p>
-        <esp-web-install-button manifest="manifest-206.json">
+        <esp-web-install-button data-manifest="manifest-206.json">
           <button slot="activate">Connect 2.06 (test)</button>
           <span slot="unsupported" class="warn">This browser can't talk to USB devices. Use Chrome or Edge on a computer.</span>
           <span slot="not-allowed" class="warn">This page must be opened over https.</span>
@@ -111,5 +111,19 @@
     <p class="dim">The 1.75 / 1.75-B and 2.06 have a battery-backed clock chip, so they keep the time while powered off. The 1.75C sets its clock over Wi-Fi after each power-on.</p>
   </div>
 </main>
+<script>
+// The page and its manifests are cached by the browser for several minutes. Load the manifests
+// fresh on every visit so the buttons always install the newest build, and show its version.
+const stamp = Date.now();
+document.querySelectorAll('esp-web-install-button[data-manifest]').forEach((b) => {
+  b.setAttribute('manifest', b.dataset.manifest + '?t=' + stamp);
+});
+for (const [id, file] of [['v-stable', 'manifest-stable.json'], ['v-test', 'manifest-175c.json']]) {
+  fetch(file + '?t=' + stamp, { cache: 'no-store' })
+    .then((r) => r.json())
+    .then((m) => { document.getElementById(id).textContent = m.version; })
+    .catch(() => {});
+}
+</script>
 </body>
 </html>

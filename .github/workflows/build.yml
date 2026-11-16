@@ -109,16 +109,20 @@ jobs:
         run: |
           set -e
           VER=$(sed -n 's/.*WATCH_VERSION *"\(.*\)".*/\1/p' main/version.h)
+          SHA=${GITHUB_SHA::7}
           mkdir -p _site
           cp site/index.html _site/
+          # The manifest version carries the build id, so it never equals the version the watch
+          # reports and the installer always offers to install (same-version reinstall included).
+          # The firmware URL carries it too, so a cached older binary is never flashed.
           for B in 175c 175 206; do
             cp fw/firmware-$B.bin _site/firmware-$B.bin
-            sed -e "s/__VERSION__/$VER/g" -e "s/__FIRMWARE__/firmware-$B.bin/g" site/manifest.json > _site/manifest-$B.json
+            sed -e "s/__VERSION__/$VER (build $SHA)/g" -e "s/__FIRMWARE__/firmware-$B.bin?v=$SHA/g" site/manifest.json > _site/manifest-$B.json
           done
           # Stable = last build confirmed on hardware. Older links (manifest.json / firmware.bin) get it too.
           read SREF SVER SBOARD < site/stable.txt
           cp fw/firmware-stable.bin _site/firmware-stable.bin
-          sed -e "s/__VERSION__/$SVER/g" -e "s/__FIRMWARE__/firmware-stable.bin/g" site/manifest.json > _site/manifest-stable.json
+          sed -e "s/__VERSION__/$SVER (stable, build $SHA)/g" -e "s/__FIRMWARE__/firmware-stable.bin?v=$SHA/g" site/manifest.json > _site/manifest-stable.json
           cp _site/manifest-stable.json _site/manifest.json
           sed -i -e "s/__VERSION__/$VER/g" -e "s/__STABLE__/$SVER/g" _site/index.html
           ls -l _site
