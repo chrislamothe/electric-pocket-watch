@@ -12,12 +12,12 @@
  * Kept in UTC. Registers 0x04..0x0A are BCD seconds..years; seconds bit 7 (OS) is set when the
  * oscillator stopped (e.g. the battery was disconnected), meaning the time is not trustworthy.
  */
-bool rtc_init(i2c_master_bus_handle_t bus);
-bool rtc_present(void);
+bool ext_rtc_init(i2c_master_bus_handle_t bus);
+bool ext_rtc_present(void);
 
 /* When the system clock is unset (cold boot), sets it from the RTC if the RTC holds a valid time.
  * Returns true if it did. */
-bool rtc_restore_system_time(void);
+bool ext_rtc_restore_system_time(void);
 
 /* Writes the current system time (after an NTP sync). */
-void rtc_save_system_time(void);
+void ext_rtc_save_system_time(void);

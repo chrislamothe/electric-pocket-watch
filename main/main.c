@@ -24,7 +24,7 @@
 #include "imu.h"
 #include "improv.h"
 #include "net.h"
-#include "rtc.h"
+#include "ext_rtc.h"
 #include "settings.h"
 #include "settings_ui.h"
 #include "splash.h"
@@ -66,8 +66,8 @@ void app_main(void)
 
     i2c_master_bus_handle_t bus = bsp_i2c_get_handle();
     board_init(bus);
-    if (rtc_init(bus)) {
-        rtc_restore_system_time();              /* before the first battery-log record */
+    if (ext_rtc_init(bus)) {
+        ext_rtc_restore_system_time();              /* before the first battery-log record */
     }
     ESP_LOGI(TAG, "step: PMIC");
     if (!axp_init(bus)) {

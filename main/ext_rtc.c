@@ -1,4 +1,4 @@
-#include "rtc.h"
+#include "ext_rtc.h"
 
 #include <sys/time.h>
 #include "esp_log.h"
@@ -40,7 +40,7 @@ static bool wr(const uint8_t *buf, size_t n)
     return s_dev && i2c_master_transmit(s_dev, buf, n, 100) == ESP_OK;
 }
 
-bool rtc_init(i2c_master_bus_handle_t bus)
+bool ext_rtc_init(i2c_master_bus_handle_t bus)
 {
     if (i2c_master_probe(bus, RTC_ADDR, 50) != ESP_OK) {
         ESP_LOGI(TAG, "no PCF85063 on this board");
@@ -68,12 +68,12 @@ bool rtc_init(i2c_master_bus_handle_t bus)
     return true;
 }
 
-bool rtc_present(void)
+bool ext_rtc_present(void)
 {
     return s_dev != NULL;
 }
 
-bool rtc_restore_system_time(void)
+bool ext_rtc_restore_system_time(void)
 {
     struct timeval now;
     gettimeofday(&now, NULL);
@@ -105,7 +105,7 @@ bool rtc_restore_system_time(void)
     return true;
 }
 
-void rtc_save_system_time(void)
+void ext_rtc_save_system_time(void)
 {
     if (!s_dev) {
         return;

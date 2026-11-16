@@ -11,7 +11,7 @@
 #include "esp_log.h"
 #include "esp_netif.h"
 #include "esp_netif_sntp.h"
-#include "rtc.h"
+#include "ext_rtc.h"
 #include "esp_wifi.h"
 #include "settings.h"
 
@@ -219,7 +219,7 @@ static bool sync_ntp(void)
         struct timeval tv;
         gettimeofday(&tv, NULL);
         ESP_LOGI(TAG, "SNTP sync ok, epoch %lld", (long long)tv.tv_sec);
-        rtc_save_system_time();                         /* boards with a PCF85063 keep it over power-off */
+        ext_rtc_save_system_time();                         /* boards with a PCF85063 keep it over power-off */
     } else {
         ESP_LOGW(TAG, "SNTP sync timed out");
     }

@@ -7,7 +7,7 @@
 
 /* Sets the time zone and, if the system clock is still unset (cold boot on a board without an RTC
  * chip, or an RTC that lost power), seeds it from the firmware build time (UTC) until an NTP sync
- * replaces it. Call after rtc_restore_system_time(). */
+ * replaces it. Call after ext_rtc_restore_system_time(). */
 void watch_time_init(void);
 
 /* Local broken-down time and milliseconds within the current second. */
