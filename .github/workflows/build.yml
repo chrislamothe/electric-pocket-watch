@@ -65,7 +65,7 @@ jobs:
           git config --global --add safe.directory "*"
           read REF VER BOARD < site/stable.txt
           echo "stable: $REF v$VER board $BOARD"
-          git worktree add ../stable "$REF"
+          git worktree add ../stable "origin/$REF" 2>/dev/null || git worktree add ../stable "$REF"
           cd ../stable
           . "$IDF_PATH/export.sh"
           if [ -f sdkconfig.stage2 ]; then
