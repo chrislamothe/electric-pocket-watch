@@ -2,14 +2,14 @@
 
 #include <stdbool.h>
 #include "driver/gpio.h"
+#include "board.h"
 
 /*
- * BOOT = GPIO0, active low (10K pull-up on the board).
- * PWR  = GPIO3 (SYS_OUT, the inverted PWR key), active high. The PMIC powers the board off on a
- * long hold by itself; that is independent of what this module reports.
+ * BOOT = BOARD_PIN_BOOT (GPIO0 on every board), active low (10K pull-up on the board).
+ * PWR  = SYS_OUT, the inverted PWR key, high while held: a GPIO on the 1.75C (GPIO3) and 2.06
+ * (GPIO10), an I/O-expander input on the 1.75 / 1.75-B. Read through board_pwr_down().
  */
-#define PIN_BOOT GPIO_NUM_0
-#define PIN_PWR  GPIO_NUM_3
+#define PIN_BOOT ((gpio_num_t)BOARD_PIN_BOOT)
 
 typedef enum {
     BTN_EVT_NONE = 0,

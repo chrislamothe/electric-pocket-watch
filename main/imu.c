@@ -24,10 +24,20 @@ static const char *TAG = "imu";
 #define REG_ACCEL_X_L   0x35
 
 #define CTRL1_BASE      0x40    /* bit6: register address auto-increment */
-#define CTRL1_INT1_EN   0x08    /* bit3: INT1 output enable */
+/* Wake-on-motion goes to the IMU pin wired to an ESP32 GPIO: INT1 on the 1.75C and 2.06, INT2 on
+ * the 1.75 / 1.75-B (INT1 goes to the I/O expander there). CTRL1 bit3 = INT1 output enable,
+ * bit4 = INT2 output enable; CAL1_H bit6 = route WoM to INT2, bit7 = initial pin level
+ * (QMI8658 datasheet WoM section; same encoding as SensorLib configWakeOnMotion). */
+#if BOARD_IMU_INT == 2
+#define CTRL1_INT_EN    0x10
+#define WOM_INT_SEL     0x40
+#else
+#define CTRL1_INT_EN    0x08
+#define WOM_INT_SEL     0x00
+#endif
 #define CTRL2_250HZ_4G  0x15    /* +/-4 g, 250 Hz normal mode */
 #define CTRL2_LP_128HZ  0x1C    /* +/-4 g, low-power 128 Hz (used by wake-on-motion) */
-#define WOM_BLANKING    0x20    /* CAL1_H: INT1, initial level low, 32 blanking samples */
+#define WOM_BLANKING    (WOM_INT_SEL | 0x20)    /* CAL1_H: pin, initial level low, 32 blanking samples */
 #define MG_PER_LSB      (4000.0f / 32768.0f)
 
 static i2c_master_dev_handle_t s_imu;
@@ -107,7 +117,7 @@ static void start_normal_mode(void)
 {
     imu_reset();
     i2c_reg_write(s_imu, REG_CTRL7, 0x00);
-    i2c_reg_write(s_imu, REG_CTRL1, CTRL1_BASE);            /* INT1 output off */
+    i2c_reg_write(s_imu, REG_CTRL1, CTRL1_BASE);            /* interrupt outputs off */
     i2c_reg_write(s_imu, REG_CTRL2, CTRL2_250HZ_4G);
     i2c_reg_write(s_imu, REG_CTRL7, 0x01);                  /* accelerometer on */
     vTaskDelay(pdMS_TO_TICKS(15));                          /* first samples after enable */
@@ -130,7 +140,7 @@ bool imu_init(i2c_master_bus_handle_t bus)
     gpio_config_t cfg = {
         .pin_bit_mask = 1ULL << PIN_IMU_INT1,
         .mode = GPIO_MODE_INPUT,
-        .pull_down_en = GPIO_PULLDOWN_ENABLE,               /* INT1 is idle-low push-pull */
+        .pull_down_en = GPIO_PULLDOWN_ENABLE,               /* INT pins are idle-low push-pull */
     };
     gpio_config(&cfg);
     ESP_LOGI(TAG, "QMI8658 ready");
@@ -152,7 +162,7 @@ bool imu_arm_wom(uint8_t threshold_mg)
     }
     imu_reset();
     i2c_reg_write(s_imu, REG_CTRL7, 0x00);
-    i2c_reg_write(s_imu, REG_CTRL1, CTRL1_BASE | CTRL1_INT1_EN);
+    i2c_reg_write(s_imu, REG_CTRL1, CTRL1_BASE | CTRL1_INT_EN);
     i2c_reg_write(s_imu, REG_CTRL2, CTRL2_LP_128HZ);
     i2c_reg_write(s_imu, REG_CAL1_L, threshold_mg);         /* threshold, 1 mg/LSB */
     i2c_reg_write(s_imu, REG_CAL1_H, WOM_BLANKING);

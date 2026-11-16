@@ -16,6 +16,7 @@
 #include "faces.h"
 #include "net.h"
 #include "version.h"
+#include "board.h"
 
 static const char *TAG = "improv";
 
@@ -88,7 +89,7 @@ static void handle_rpc(const uint8_t *d, uint8_t len)
         break;
 
     case CMD_INFO: {
-        const char *info[] = {WATCH_NAME, WATCH_VERSION, "ESP32-S3", "Pocket Watch"};
+        const char *info[] = {WATCH_NAME, WATCH_VERSION, "ESP32-S3", "Pocket Watch " BOARD_SHORT};
         send_result(CMD_INFO, info, 4);
         break;
     }

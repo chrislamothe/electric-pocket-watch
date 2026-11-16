@@ -127,10 +127,11 @@ static void batt_raise(void)
 
 static void batt_create(void)
 {
-    int w = lv_display_get_horizontal_resolution(NULL);
-    s_batt_cx = w / 2;
-    s_batt_cy = lv_display_get_vertical_resolution(NULL) / 2;
-    s_batt_r = w / 2 - 2;
+    int side, ox, oy;
+    faces_dial_geometry(&side, &ox, &oy);
+    s_batt_cx = ox + side / 2;
+    s_batt_cy = oy + side / 2;
+    s_batt_r = side / 2 - 2;
     for (int i = 0; i < BATT_SEGMENTS; i++) {
         /* bounding box of the segment: sample both edges along the arc */
         int start, end;
@@ -237,6 +238,31 @@ static void gesture_cb(lv_event_t *e)
         /* Deleting the face from inside its own event callback is unsafe: defer. */
         lv_async_call(async_step, (void *)(intptr_t)(dir == LV_DIR_LEFT ? 1 : -1));
     }
+}
+
+void faces_dial_geometry(int *size, int *x, int *y)
+{
+    int w = lv_display_get_horizontal_resolution(NULL);
+    int h = lv_display_get_vertical_resolution(NULL);
+    int s = w < h ? w : h;
+    if (size) {
+        *size = s;
+    }
+    if (x) {
+        *x = (w - s) / 2;
+    }
+    if (y) {
+        *y = (h - s) / 2;
+    }
+}
+
+void faces_place_root(lv_obj_t *root)
+{
+    int s, x, y;
+    faces_dial_geometry(&s, &x, &y);
+    lv_obj_set_size(root, s, s);
+    lv_obj_set_pos(root, x, y);
+    lv_obj_set_ext_click_area(root, x > y ? x : y);
 }
 
 void faces_init(void)

@@ -21,37 +21,66 @@
     font:600 1rem system-ui, sans-serif; cursor:pointer;
   }
   .warn { color:#e6a15a; }
+  .boards { display:grid; gap:14px; margin-top:8px; }
+  .board { border:1px solid var(--line); border-radius:12px; padding:16px; }
+  .board b { display:block; font-weight:normal; font-size:1.05rem; margin-bottom:2px; }
+  .board .dim { margin:0 0 12px; }
 </style>
 </head>
 <body>
 <main>
   <h1>Electric Pocket Watch</h1>
-  <p class="sub">Firmware for the Waveshare ESP32-S3-Touch-AMOLED-1.75C &middot; version <span id="ver">__VERSION__</span></p>
+  <p class="sub">Firmware for Waveshare ESP32-S3 AMOLED boards &middot; version <span id="ver">__VERSION__</span></p>
 
   <div class="card">
     <h2>Install or set up Wi-Fi</h2>
-    <esp-web-install-button manifest="manifest.json">
-      <button slot="activate">Connect watch</button>
-      <span slot="unsupported" class="warn">This browser can't talk to USB devices. Use Chrome or Edge on a computer.</span>
-      <span slot="not-allowed" class="warn">This page must be opened over https.</span>
-    </esp-web-install-button>
-    <p class="dim">Plug the watch into this computer with a USB-C data cable, click <b>Connect watch</b>, and pick the watch's port (USB JTAG/serial debug unit).</p>
+    <p class="dim">Pick your board. The model is printed on the box label (for example <i>ESP32-S3-Touch-AMOLED-1.75C-EN</i>). Each board needs its own firmware.</p>
+    <div class="boards">
+      <div class="board">
+        <b>ESP32-S3-Touch-AMOLED-1.75C</b>
+        <p class="dim">1.75&Prime; round, aluminium case</p>
+        <esp-web-install-button manifest="manifest-175c.json">
+          <button slot="activate">Connect 1.75C</button>
+          <span slot="unsupported" class="warn">This browser can't talk to USB devices. Use Chrome or Edge on a computer.</span>
+          <span slot="not-allowed" class="warn">This page must be opened over https.</span>
+        </esp-web-install-button>
+      </div>
+      <div class="board">
+        <b>ESP32-S3-Touch-AMOLED-1.75 / 1.75-B</b>
+        <p class="dim">1.75&Prime; round, bare board or with protective case (SKU 31261 / 31262)</p>
+        <esp-web-install-button manifest="manifest-175.json">
+          <button slot="activate">Connect 1.75 / 1.75-B</button>
+          <span slot="unsupported" class="warn">This browser can't talk to USB devices. Use Chrome or Edge on a computer.</span>
+          <span slot="not-allowed" class="warn">This page must be opened over https.</span>
+        </esp-web-install-button>
+      </div>
+      <div class="board">
+        <b>ESP32-S3-Touch-AMOLED-2.06</b>
+        <p class="dim">2.06&Prime; rectangular watch board (SKU 31957)</p>
+        <esp-web-install-button manifest="manifest-206.json">
+          <button slot="activate">Connect 2.06</button>
+          <span slot="unsupported" class="warn">This browser can't talk to USB devices. Use Chrome or Edge on a computer.</span>
+          <span slot="not-allowed" class="warn">This page must be opened over https.</span>
+        </esp-web-install-button>
+      </div>
+    </div>
+    <p class="dim">Plug the watch into this computer with a USB-C data cable, click its button, and pick the watch's port (USB JTAG/serial debug unit). Firmware for a different board will not run correctly; if the screen stays dark after installing, check the board name and install again.</p>
   </div>
 
   <div class="card">
     <h2>First install</h2>
     <ol>
-      <li>Click <b>Connect watch</b> and choose <b>Install Electric Pocket Watch</b>.</li>
+      <li>Click your board's button and choose <b>Install Electric Pocket Watch</b>.</li>
       <li>When it finishes, the page asks for your Wi-Fi network and password. The watch joins once, sets its clock, and turns Wi-Fi off again.</li>
     </ol>
-    <p class="dim">Use a 2.4 GHz network. Installing again erases the saved Wi-Fi.</p>
+    <p class="dim">Use a 2.4 GHz network. Choosing <b>erase</b> during install also erases the saved Wi-Fi and the battery log.</p>
   </div>
 
   <div class="card">
     <h2>Change Wi-Fi later</h2>
     <p class="dim">On the watch: Settings &rarr; Wi-Fi &rarr; Choose network, pick one, type the password. Or from this page:</p>
     <ol>
-      <li>Plug the watch in and click <b>Connect watch</b>.</li>
+      <li>Plug the watch in and click your board's button.</li>
       <li>Choose <b>Change Wi-Fi</b> (or <b>Connect to Wi-Fi</b>) and enter the network.</li>
     </ol>
   </div>
@@ -61,10 +90,11 @@
     <ol>
       <li><b>Wake:</b> press BOOT or PWR, or double-tap the case.</li>
       <li><b>Change face:</b> press BOOT or swipe.</li>
-      <li><b>Settings:</b> double-press BOOT or swipe up. Wi-Fi (status, networks, set time), Display (brightness, screen-on time), dial theme.</li>
+      <li><b>Settings:</b> double-press BOOT or swipe up. Wi-Fi (status, networks, set time), Display (brightness, screen-on time, on while charging), System (battery, log, restart).</li>
       <li><b>Set the time:</b> hold BOOT for a second while the screen is on.</li>
-      <li><b>Screen off:</b> press PWR. Holding PWR for several seconds powers the watch off.</li>
+      <li><b>Screen off:</b> press PWR. <b>Power off:</b> hold PWR for 3 seconds; press PWR or plug in USB to turn it back on.</li>
     </ol>
+    <p class="dim">The 1.75 / 1.75-B and 2.06 have a battery-backed clock chip, so they keep the time while powered off. The 1.75C sets its clock over Wi-Fi after each power-on.</p>
   </div>
 </main>
 </body>

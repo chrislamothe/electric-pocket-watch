@@ -3,3 +3,5 @@ managed_components/
 sdkconfig
 sdkconfig.old
 *.pyc
+dependencies.*.lock
+build-*/

@@ -10,6 +10,7 @@
 #include "bsp/esp-bsp.h"
 #include "settings.h"
 #include "version.h"
+#include "board.h"
 
 static const char *TAG = "splash";
 
@@ -62,7 +63,7 @@ void splash_show(void)
     text(s_splash, "Electric", &lv_font_montserrat_36, 0xC9A04A, -52);
     text(s_splash, "Pocket Watch", &lv_font_montserrat_36, 0xC9A04A, -10);
     char v[24];
-    snprintf(v, sizeof(v), "v%s", WATCH_VERSION);
+    snprintf(v, sizeof(v), "v%s  %s", WATCH_VERSION, BOARD_SHORT);
     text(s_splash, v, &lv_font_montserrat_20, 0xA89F88, 38);
     bool abnormal = (r == ESP_RST_PANIC || r == ESP_RST_INT_WDT || r == ESP_RST_TASK_WDT ||
                      r == ESP_RST_WDT || r == ESP_RST_BROWNOUT);

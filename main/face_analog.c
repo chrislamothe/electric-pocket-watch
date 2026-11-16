@@ -4,7 +4,8 @@
  *   face_arabic - arabic numerals, red centre seconds hand (cream dial)
  *   face_black  - black dial, silver case, large cream arabic numerals, outer 5..60 minute
  *                 numbers, thin silver hands (fixed palette)
- * Geometry is derived from the display size (466 px on the 1.75C).
+ * Geometry is derived from the dial square (faces_dial_geometry: 466 px on the 1.75 boards,
+ * 410 px on the 2.06).
  *
  * Hands are line objects sized to their own bounding box and moved every second, so LVGL only
  * redraws the area a hand leaves and enters instead of the whole dial.
@@ -177,7 +178,7 @@ static lv_obj_t *create(lv_obj_t *parent, int theme, const analog_style_t *style
     (void)theme;
     const analog_palette_t *t = style->palette ? style->palette : &CLASSIC;
     s_style = style;
-    S = lv_display_get_horizontal_resolution(NULL);
+    faces_dial_geometry(&S, NULL, NULL);
     C = S / 2;
     SUB_R = S / 10;
     SUB_CY = C + (S * 19) / 100;
@@ -185,8 +186,7 @@ static lv_obj_t *create(lv_obj_t *parent, int theme, const analog_style_t *style
     lv_obj_t *root = lv_obj_create(parent);
     lv_obj_remove_style_all(root);
     lv_obj_remove_flag(root, LV_OBJ_FLAG_SCROLLABLE);   /* stays clickable: receives the swipe */
-    lv_obj_set_size(root, S, S);
-    lv_obj_set_pos(root, 0, 0);
+    faces_place_root(root);
 
     disc(root, C, C, S, t->dial, 0, 0);                 /* dial to the glass edge, no case ring */
 

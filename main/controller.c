@@ -56,9 +56,14 @@ static void power_off_empty(int rest_mv)
     set_brightness(0);
     axp_power_off();
     vTaskDelay(pdMS_TO_TICKS(1000));
-    /* Still running: the PMIC ignored the command. Sleep until PWR rather than drain further. */
+    /* Still running: the PMIC ignored the command. Sleep until a button rather than drain further. */
+#if BOARD_PIN_PWR >= 0
     ESP_LOGE(TAG, "PMIC power-off failed; deep sleep until PWR");
-    esp_sleep_enable_ext0_wakeup(PIN_PWR, 1);
+    esp_sleep_enable_ext0_wakeup((gpio_num_t)BOARD_PIN_PWR, 1);
+#else
+    ESP_LOGE(TAG, "PMIC power-off failed; deep sleep until BOOT");
+    esp_sleep_enable_ext0_wakeup(PIN_BOOT, 0);
+#endif
     esp_deep_sleep_start();
 }
 
@@ -359,10 +364,12 @@ static void arm_for_sleep(void)
     ESP_LOGI(TAG, "wake-on-motion armed, INT1 idle level %d", s_imu_idle_level);
 }
 
-/* Light sleep until one of BOOT (low), PWR (high) or IMU INT1 (high) fires. Per-pin wake levels
+/* Light sleep until one of BOOT (low), PWR (high) or the IMU interrupt fires. Per-pin wake levels
  * are supported by gpio_wakeup_enable() in light sleep (ESP-IDF sleep_modes docs), which is what
- * allows the mixed polarity. While USB power is present the watch only idles, so the serial log
- * survives, unless CONFIG_WATCH_SLEEP_ON_USB is set. */
+ * allows the mixed polarity. Where PWR is not on a GPIO (1.75 / 1.75-B: I/O expander without a
+ * routed interrupt), the timer wakes the chip every BOARD_PWR_POLL_MS to read it. While USB power
+ * is present the watch only idles, so the serial log survives, unless CONFIG_WATCH_SLEEP_ON_USB
+ * is set. */
 static wake_src_t wait_for_wake(void)
 {
 #ifdef CONFIG_WATCH_SLEEP_ON_USB
@@ -375,15 +382,25 @@ static wake_src_t wait_for_wake(void)
     }
     if (light) {
         gpio_wakeup_enable(PIN_BOOT, GPIO_INTR_LOW_LEVEL);
-        gpio_wakeup_enable(PIN_PWR, GPIO_INTR_HIGH_LEVEL);
+#if BOARD_PIN_PWR >= 0
+        gpio_wakeup_enable((gpio_num_t)BOARD_PIN_PWR, GPIO_INTR_HIGH_LEVEL);
+#endif
         gpio_wakeup_enable(PIN_IMU_INT1, s_imu_idle_level ? GPIO_INTR_LOW_LEVEL : GPIO_INTR_HIGH_LEVEL);
         esp_sleep_enable_gpio_wakeup();
-        esp_sleep_enable_timer_wakeup(battlog_us_until_due());    /* battery log sample */
+        uint64_t wake_us = battlog_us_until_due();              /* battery log sample */
+#if BOARD_PWR_POLL_MS > 0
+        if (wake_us > (uint64_t)BOARD_PWR_POLL_MS * 1000) {
+            wake_us = (uint64_t)BOARD_PWR_POLL_MS * 1000;       /* read PWR (not a wake pin) */
+        }
+#endif
+        esp_sleep_enable_timer_wakeup(wake_us);
         lowpower_sleep_begin();
         esp_err_t r = esp_light_sleep_start();
         lowpower_sleep_end(r == ESP_OK);
         gpio_wakeup_disable(PIN_BOOT);
-        gpio_wakeup_disable(PIN_PWR);
+#if BOARD_PIN_PWR >= 0
+        gpio_wakeup_disable((gpio_num_t)BOARD_PIN_PWR);
+#endif
         gpio_wakeup_disable(PIN_IMU_INT1);
         if (r != ESP_OK) {
             vTaskDelay(pdMS_TO_TICKS(10));           /* rejected: a wake level was already active */

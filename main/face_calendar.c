@@ -187,7 +187,7 @@ static void draw_moon(float phase)
 static lv_obj_t *create(lv_obj_t *parent, int theme)
 {
     (void)theme;                                        /* fixed palette */
-    S = lv_display_get_horizontal_resolution(NULL);
+    faces_dial_geometry(&S, NULL, NULL);
     C = S / 2;
     MOON_CY = C + 64;
     s_last_yday = -1;
@@ -195,8 +195,7 @@ static lv_obj_t *create(lv_obj_t *parent, int theme)
     lv_obj_t *root = lv_obj_create(parent);
     lv_obj_remove_style_all(root);
     lv_obj_remove_flag(root, LV_OBJ_FLAG_SCROLLABLE);
-    lv_obj_set_size(root, S, S);
-    lv_obj_set_pos(root, 0, 0);
+    faces_place_root(root);
     lv_obj_set_style_bg_opa(root, LV_OPA_COVER, 0);
     lv_obj_set_style_bg_color(root, lv_color_hex(COL_DIAL), 0);
 

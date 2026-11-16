@@ -1,9 +1,8 @@
 /*
  * Electric Pocket Watch
  *
- * Board: Waveshare ESP32-S3-Touch-AMOLED-1.75C.
- * CONFIG_WATCH_STAGE 1: faces only, screen always on, BOOT short = next face, serial heartbeat.
- * CONFIG_WATCH_STAGE 2: full controller (screen off until BOOT, PWR or a double tap).
+ * Boards: Waveshare ESP32-S3-Touch-AMOLED-1.75C, -1.75 / -1.75-B, -2.06 (boards/, selected at
+ * build time with -D BOARD=...). The screen stays off until BOOT, PWR or a double tap.
  *
  * The bring-up/diagnostic firmware is commit 986ce41 (v0.0.8).
  */
@@ -14,6 +13,7 @@
 #include "esp_heap_caps.h"
 #include "esp_log.h"
 #include "bsp/esp-bsp.h"
+#include "board.h"
 #include "axp.h"
 #include "battlog.h"
 #include "buttons.h"
@@ -24,6 +24,7 @@
 #include "imu.h"
 #include "improv.h"
 #include "net.h"
+#include "rtc.h"
 #include "settings.h"
 #include "settings_ui.h"
 #include "splash.h"
@@ -32,8 +33,9 @@
 
 static const char *TAG = "pocketwatch";
 
-/* The 1.75C has no RTC chip, so the clock is lost on every power-off. Try one sync shortly after
- * boot (saved network, or an open one if allowed); the result shows under Settings > Wi-Fi. */
+/* Try one sync shortly after boot (saved network, or an open one if allowed); the result shows
+ * under Settings > Wi-Fi. Without an RTC chip (1.75C) this is what sets the clock after a
+ * power-off; with one it corrects drift. */
 static void boot_sync_task(void *arg)
 {
     (void)arg;
@@ -43,34 +45,10 @@ static void boot_sync_task(void *arg)
     vTaskDelete(NULL);
 }
 
-static void stage1_loop(void)
-{
-    bsp_display_brightness_set(CONFIG_WATCH_BRIGHTNESS);
-    ESP_LOGI(TAG, "stage 1: screen on at %d%%", CONFIG_WATCH_BRIGHTNESS);
-    uint32_t n = 0;
-    while (1) {
-        if (buttons_poll() == BTN_BOOT_SHORT) {
-            ESP_LOGI(TAG, "BOOT short: next face");
-            faces_next();
-        }
-        if ((++n % 200) == 0) {                 /* every ~2 s */
-            struct tm t;
-            watch_time_now(&t, NULL);
-            ESP_LOGI(TAG, "alive %02d:%02d:%02d  heap internal %u  psram %u  battery %d%%  VBUS %d",
-                     t.tm_hour, t.tm_min, t.tm_sec,
-                     (unsigned)heap_caps_get_free_size(MALLOC_CAP_INTERNAL),
-                     (unsigned)heap_caps_get_free_size(MALLOC_CAP_SPIRAM),
-                     axp_battery_percent(), axp_vbus_good());
-        }
-        vTaskDelay(pdMS_TO_TICKS(10));
-    }
-}
-
 void app_main(void)
 {
     improv_start();                             /* USB serial driver first: console goes through it */
-    ESP_LOGI(TAG, "%s %s stage %d (built %s %s)", WATCH_NAME, WATCH_VERSION, CONFIG_WATCH_STAGE,
-             __DATE__, __TIME__);
+    ESP_LOGI(TAG, "%s %s for %s (built %s %s)", WATCH_NAME, WATCH_VERSION, BOARD_NAME, __DATE__, __TIME__);
     settings_init();
     net_init();
     settings_ui_init();
@@ -87,6 +65,10 @@ void app_main(void)
     splash_show();                              /* name, version, reset reason */
 
     i2c_master_bus_handle_t bus = bsp_i2c_get_handle();
+    board_init(bus);
+    if (rtc_init(bus)) {
+        rtc_restore_system_time();              /* before the first battery-log record */
+    }
     ESP_LOGI(TAG, "step: PMIC");
     if (!axp_init(bus)) {
         ESP_LOGE(TAG, "PMIC not available");
@@ -94,9 +76,7 @@ void app_main(void)
         axp_configure_power_key();
         battlog_init();
         battlog_sample("boot");
-#if CONFIG_WATCH_STAGE == 2
         controller_check_empty_at_boot();
-#endif
     }
     ESP_LOGI(TAG, "step: IMU");
     if (!imu_init(bus)) {
@@ -118,10 +98,6 @@ void app_main(void)
              (unsigned)heap_caps_get_free_size(MALLOC_CAP_INTERNAL),
              (unsigned)heap_caps_get_free_size(MALLOC_CAP_SPIRAM));
 
-#if CONFIG_WATCH_STAGE == 1
-    stage1_loop();
-#else
     xTaskCreate(boot_sync_task, "boot_sync", 6144, NULL, 3, NULL);
     controller_run();
-#endif
 }

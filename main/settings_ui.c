@@ -31,6 +31,7 @@
 #include "battlog.h"
 #include "lowpower.h"
 #include "version.h"
+#include "board.h"
 #include "bsp/esp-bsp.h"
 #include "faces.h"
 #include "net.h"
@@ -645,7 +646,7 @@ static void build_system(void)
 {
     frame("System", 320);
     char buf[512];
-    int o = snprintf(buf, sizeof(buf), "%s %s\n", WATCH_NAME, WATCH_VERSION);
+    int o = snprintf(buf, sizeof(buf), "%s %s (%s)\n", WATCH_NAME, WATCH_VERSION, BOARD_SHORT);
     battlog_summary(buf + o, sizeof(buf) - o);
     o = (int)strlen(buf);
     if (o < (int)sizeof(buf) - 2) {

@@ -10,7 +10,7 @@ static bool s_boot_pending;          /* one BOOT short press seen, waiting for a
 static int64_t s_boot_pending_ms;
 
 typedef struct {
-    gpio_num_t pin;
+    gpio_num_t pin;                 /* GPIO_NUM_NC: read through board_pwr_down() */
     bool active_high;
     bool down;                      /* debounced state */
     int agree;                      /* consecutive samples disagreeing with 'down' */
@@ -20,7 +20,7 @@ typedef struct {
 } button_t;
 
 static button_t s_boot = {.pin = PIN_BOOT, .active_high = false};
-static button_t s_pwr  = {.pin = PIN_PWR,  .active_high = true};
+static button_t s_pwr  = {.pin = GPIO_NUM_NC, .active_high = true};
 
 static inline int64_t now_ms(void)
 {
@@ -29,6 +29,9 @@ static inline int64_t now_ms(void)
 
 static bool raw_down(const button_t *b)
 {
+    if (b->pin == GPIO_NUM_NC) {
+        return board_pwr_down();
+    }
     return (gpio_get_level(b->pin) != 0) == b->active_high;
 }
 
@@ -40,12 +43,7 @@ void buttons_init(void)
         .pull_up_en = GPIO_PULLUP_ENABLE,
     };
     gpio_config(&boot);
-    gpio_config_t pwr = {
-        .pin_bit_mask = 1ULL << PIN_PWR,
-        .mode = GPIO_MODE_INPUT,    /* driven by the board's FET: low idle, high while pressed */
-    };
-    gpio_config(&pwr);
-    buttons_sync_and_consume();
+    buttons_sync_and_consume();                 /* PWR is configured by board_init() */
 }
 
 bool buttons_boot_down_raw(void) { return raw_down(&s_boot); }

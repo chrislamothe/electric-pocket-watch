@@ -3,10 +3,12 @@
 #include <stdbool.h>
 #include "driver/i2c_master.h"
 #include "driver/gpio.h"
+#include "board.h"
 
 /*
- * QMI8658 (I2C 0x6B). INT1 is wired to GPIO21 (1.75C schematic); INT2 is not connected.
- * Verified on hardware (v0.0.8 log): wake-on-motion toggles GPIO21 high, and the IMU keeps
+ * QMI8658 (I2C 0x6B). The interrupt pin used for wake-on-motion is BOARD_PIN_IMU_INT (GPIO21 on
+ * every supported board): INT1 on the 1.75C and 2.06, INT2 on the 1.75 / 1.75-B (BOARD_IMU_INT).
+ * Verified on the 1.75C (v0.0.8 log): wake-on-motion toggles GPIO21 high, and the IMU keeps
  * power across ESP32 resets so init always soft-resets it.
  *
  * Wake strategy: the sleeping watch arms wake-on-motion (low-power 128 Hz). Any motion that
@@ -14,7 +16,7 @@
  * and checks in software that a second tap follows. WoM mode reports zero acceleration data,
  * so tap detection is only possible in normal mode.
  */
-#define PIN_IMU_INT1 GPIO_NUM_21
+#define PIN_IMU_INT1 ((gpio_num_t)BOARD_PIN_IMU_INT)   /* name kept: the wake pin */
 
 bool imu_init(i2c_master_bus_handle_t bus);
 

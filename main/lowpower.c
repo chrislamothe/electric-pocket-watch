@@ -9,12 +9,13 @@
 #include "esp_log.h"
 #include "esp_timer.h"
 #include "bsp/esp-bsp.h"
+#include "board.h"
 #include "display_dma.h"
 
 static const char *TAG = "lowpower";
 
-#define PIN_TOUCH_RST   BSP_LCD_TOUCH_RST   /* GPIO2 */
-#define PIN_SPEAKER_PA  BSP_POWER_AMP_IO    /* GPIO46 */
+#define PIN_TOUCH_RST   ((gpio_num_t)BOARD_PIN_TOUCH_RST)
+#define PIN_SPEAKER_PA  ((gpio_num_t)BOARD_PIN_SPEAKER_PA)
 #define TOUCH_BOOT_MS   60                  /* CST9217 start-up after reset release */
 
 static bool s_touch_held;
@@ -59,9 +60,11 @@ static void panel_on_off(bool on)
 void lowpower_screen_off(void)
 {
     panel_on_off(false);
+#if BOARD_TOUCH_SLEEP_RESET
     gpio_set_level(PIN_TOUCH_RST, 0);
     gpio_hold_en(PIN_TOUCH_RST);
     s_touch_held = true;
+#endif
 }
 
 void lowpower_screen_on(void)

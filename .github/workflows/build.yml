@@ -10,49 +10,49 @@ jobs:
   build:
     runs-on: ubuntu-latest
     container: espressif/idf:v5.5.5
+    strategy:
+      fail-fast: false
+      matrix:
+        # boards/<id>: 175c = ESP32-S3-Touch-AMOLED-1.75C, 175 = -1.75 / -1.75-B, 206 = -2.06
+        board: [175c, 175, 206]
     steps:
       - uses: actions/checkout@v7
 
-      - name: Build firmware (stage 1 and stage 2)
+      - name: Build firmware (${{ matrix.board }})
         shell: bash
+        env:
+          BOARD: ${{ matrix.board }}
         run: |
           set -e
           git config --global --add safe.directory "*"
           . "$IDF_PATH/export.sh"
-          for STAGE in 1 2; do
-            B=build-stage$STAGE
-            DEFAULTS="sdkconfig.defaults"
-            [ "$STAGE" = 2 ] && DEFAULTS="sdkconfig.defaults;sdkconfig.stage2"
-            idf.py -B $B -D SDKCONFIG=$B/sdkconfig -D SDKCONFIG_DEFAULTS="$DEFAULTS" set-target esp32s3
-            idf.py -B $B -D SDKCONFIG=$B/sdkconfig -D SDKCONFIG_DEFAULTS="$DEFAULTS" build
-            echo "== stage $STAGE: key config values (a missing line means the option was ignored) =="
-            grep -E "^CONFIG_(WATCH_STAGE|LV_USE_CLIB_MALLOC|LV_OS_FREERTOS|LV_USE_LOG|LV_LOG_PRINTF|RTC_CLK_SRC_INT_8MD256|LV_FONT_MONTSERRAT_16|LV_FONT_MONTSERRAT_20|LV_USE_CANVAS|LV_FONT_MONTSERRAT_28|LV_FONT_MONTSERRAT_36|LV_FONT_MONTSERRAT_48|SPIRAM_MODE_OCT|ESP_CONSOLE_USB_SERIAL_JTAG|PARTITION_TABLE_CUSTOM|LV_THEME_DEFAULT_DARK|LV_USE_KEYBOARD|LV_DRAW_SW_DRAW_UNIT_CNT|ESP_TASK_WDT_PANIC|ESP_TASK_WDT_TIMEOUT_S|SPIRAM_TRY_ALLOCATE_WIFI_LWIP|SPIRAM_MALLOC_RESERVE_INTERNAL)=" $B/sdkconfig || true
-            idf.py -B $B -D SDKCONFIG=$B/sdkconfig size
-            idf.py -B $B -D SDKCONFIG=$B/sdkconfig merge-bin -o merged-stage$STAGE.bin
-            F=$(find . -name merged-stage$STAGE.bin | head -1)
-            echo "merged binary: $F"
-            cp -f "$F" firmware-stage$STAGE.bin
-          done
-          ls -l firmware-stage*.bin
+          B=build-$BOARD
+          idf.py -B $B -D BOARD=$BOARD -D SDKCONFIG=$B/sdkconfig set-target esp32s3
+          idf.py -B $B -D BOARD=$BOARD -D SDKCONFIG=$B/sdkconfig build
+          echo "== key config values (a missing line means the option was ignored) =="
+          grep -E "^CONFIG_(LV_USE_CLIB_MALLOC|LV_OS_FREERTOS|LV_USE_LOG|LV_LOG_PRINTF|RTC_CLK_SRC_INT_8MD256|LV_FONT_MONTSERRAT_16|LV_FONT_MONTSERRAT_20|LV_USE_CANVAS|LV_FONT_MONTSERRAT_28|LV_FONT_MONTSERRAT_36|LV_FONT_MONTSERRAT_48|SPIRAM_MODE_OCT|ESP_CONSOLE_USB_SERIAL_JTAG|PARTITION_TABLE_CUSTOM|LV_THEME_DEFAULT_DARK|LV_USE_KEYBOARD|LV_DRAW_SW_DRAW_UNIT_CNT|ESP_TASK_WDT_PANIC|ESP_TASK_WDT_TIMEOUT_S|SPIRAM_TRY_ALLOCATE_WIFI_LWIP|SPIRAM_MALLOC_RESERVE_INTERNAL)=" $B/sdkconfig || true
+          idf.py -B $B -D SDKCONFIG=$B/sdkconfig size
+          idf.py -B $B -D SDKCONFIG=$B/sdkconfig merge-bin -o merged-$BOARD.bin
+          F=$(find . -name merged-$BOARD.bin | head -1)
+          echo "merged binary: $F"
+          cp -f "$F" firmware-$BOARD.bin
+          ls -l firmware-$BOARD.bin
           echo "== resolved component versions =="
-          grep -E "^  [a-z].*:$|^    version:" dependencies.lock | paste - - | head -40
+          grep -E "^  [a-z].*:$|^    version:" dependencies.$BOARD.lock | paste - - | head -40
 
       - name: Upload firmware
         uses: actions/upload-artifact@v7
         with:
-          name: firmware
+          name: firmware-${{ matrix.board }}
           path: |
-            firmware-stage1.bin
-            firmware-stage2.bin
-            dependencies.lock
+            firmware-${{ matrix.board }}.bin
+            dependencies.${{ matrix.board }}.lock
           if-no-files-found: error
 
   pages:
-    # Publishes the browser installer (ESP Web Tools) with the stage 2 firmware.
-    # One-time setup: repository Settings > Pages > Source: GitHub Actions.
+    # Publishes the browser installer (ESP Web Tools): one install button and manifest per board.
     if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main'
     needs: build
-    # Until Pages is enabled the deploy step 404s; don't fail the run (and email) for that.
     continue-on-error: true
     runs-on: ubuntu-latest
     permissions:
@@ -65,7 +65,8 @@ jobs:
       - uses: actions/checkout@v7
       - uses: actions/download-artifact@v8
         with:
-          name: firmware
+          pattern: firmware-*
+          merge-multiple: true
           path: fw
       - name: Assemble site
         shell: bash
@@ -73,11 +74,18 @@ jobs:
           set -e
           VER=$(sed -n 's/.*WATCH_VERSION *"\(.*\)".*/\1/p' main/version.h)
           mkdir -p _site
-          cp site/index.html site/manifest.json _site/
-          cp fw/firmware-stage2.bin _site/firmware.bin
-          sed -i "s/__VERSION__/$VER/g" _site/index.html _site/manifest.json
+          cp site/index.html _site/
+          for B in 175c 175 206; do
+            cp fw/firmware-$B.bin _site/firmware-$B.bin
+            sed -e "s/__VERSION__/$VER/g" -e "s/__FIRMWARE__/firmware-$B.bin/g" site/manifest.json > _site/manifest-$B.json
+          done
+          # Links from before multi-board support point at manifest.json / firmware.bin (1.75C).
+          cp _site/manifest-175c.json _site/manifest.json
+          sed -i "s/firmware-175c.bin/firmware.bin/" _site/manifest.json
+          cp _site/firmware-175c.bin _site/firmware.bin
+          sed -i "s/__VERSION__/$VER/g" _site/index.html
           ls -l _site
-          cat _site/manifest.json
+          cat _site/manifest-206.json
       - uses: actions/upload-pages-artifact@v5
         with:
           path: _site

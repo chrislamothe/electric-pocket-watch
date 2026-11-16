@@ -40,6 +40,7 @@ typedef struct {
 } line_hand_t;
 
 static int S, C;
+static int s_ox, s_oy;          /* dial square's screen position: draw callbacks use screen coords */
 static spade_t s_hour, s_min;
 static line_hand_t s_sec;
 
@@ -84,10 +85,10 @@ static void draw_line(lv_layer_t *layer, float x0, float y0, float x1, float y1,
     d.width = w;
     d.round_start = round;
     d.round_end = round;
-    d.p1.x = (lv_value_precise_t)x0;
-    d.p1.y = (lv_value_precise_t)y0;
-    d.p2.x = (lv_value_precise_t)x1;
-    d.p2.y = (lv_value_precise_t)y1;
+    d.p1.x = (lv_value_precise_t)(x0 + s_ox);
+    d.p1.y = (lv_value_precise_t)(y0 + s_oy);
+    d.p2.x = (lv_value_precise_t)(x1 + s_ox);
+    d.p2.y = (lv_value_precise_t)(y1 + s_oy);
     lv_draw_line(layer, &d);
 }
 
@@ -97,12 +98,12 @@ static void draw_tri(lv_layer_t *layer, float ax, float ay, float bx, float by, 
     lv_draw_triangle_dsc_init(&d);
     d.color = lv_color_hex(s_pal->ink);
     d.opa = LV_OPA_COVER;
-    d.p[0].x = (lv_value_precise_t)ax;
-    d.p[0].y = (lv_value_precise_t)ay;
-    d.p[1].x = (lv_value_precise_t)bx;
-    d.p[1].y = (lv_value_precise_t)by;
-    d.p[2].x = (lv_value_precise_t)cx;
-    d.p[2].y = (lv_value_precise_t)cy;
+    d.p[0].x = (lv_value_precise_t)(ax + s_ox);
+    d.p[0].y = (lv_value_precise_t)(ay + s_oy);
+    d.p[1].x = (lv_value_precise_t)(bx + s_ox);
+    d.p[1].y = (lv_value_precise_t)(by + s_oy);
+    d.p[2].x = (lv_value_precise_t)(cx + s_ox);
+    d.p[2].y = (lv_value_precise_t)(cy + s_oy);
     lv_draw_triangle(layer, &d);
 }
 
@@ -113,6 +114,8 @@ static void draw_dot(lv_layer_t *layer, float x, float y, float r)
     d.bg_color = lv_color_hex(s_pal->ink);
     d.bg_opa = LV_OPA_COVER;
     d.radius = LV_RADIUS_CIRCLE;
+    x += s_ox;
+    y += s_oy;
     lv_area_t a = {(int32_t)(x - r), (int32_t)(y - r), (int32_t)(x + r), (int32_t)(y + r)};
     lv_draw_rect(layer, &d, &a);
 }
@@ -255,14 +258,13 @@ static void label_at(lv_obj_t *parent, const char *txt, const lv_font_t *font, f
 static lv_obj_t *create(lv_obj_t *parent, const rr_palette_t *pal)
 {
     s_pal = pal;
-    S = lv_display_get_horizontal_resolution(NULL);
+    faces_dial_geometry(&S, &s_ox, &s_oy);
     C = S / 2;
 
     lv_obj_t *root = lv_obj_create(parent);
     lv_obj_remove_style_all(root);
     lv_obj_remove_flag(root, LV_OBJ_FLAG_SCROLLABLE);
-    lv_obj_set_size(root, S, S);
-    lv_obj_set_pos(root, 0, 0);
+    faces_place_root(root);
 
     disc(root, C, C, S, pal->dial, LV_OPA_COVER, pal->edge_ring, pal->ink);   /* dial + optional edge ring */
 
