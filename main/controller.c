@@ -461,14 +461,12 @@ static void run_screen_off(void)
             buttons_sync_and_consume();
             battlog_note_wake(BATTLOG_WAKE_USB);
             screen_on("USB connected");
-            faces_show_status("Woke: USB power", 3000);     /* test builds: shows why it lit up */
             break;
         }
         if (w != WAKE_NONE && wake_confirmed(w)) {
             buttons_sync_and_consume();              /* this press only wakes the screen */
             battlog_note_wake(w == WAKE_BOOT ? BATTLOG_WAKE_BOOT : BATTLOG_WAKE_PWR);
             screen_on(w == WAKE_BOOT ? "BOOT" : "PWR");
-            faces_show_status(w == WAKE_BOOT ? "Woke: BOOT" : "Woke: PWR", 3000);
             s_ignore_boot = s_ignore_pwr = false;
         }
     }
