@@ -184,14 +184,22 @@ void axp_configure_power_key(void)
 #define AXP_INTSTS2  0x49
 #define AXP_PKEY_NEG 0x02
 
-void axp_pkey_latch_enable(void)
+bool axp_pkey_latch_enable(void)
 {
-    uint8_t en = 0;
+    uint8_t en = 0, check = 0;
     if (!s_axp || i2c_reg_read(s_axp, AXP_INTEN2, &en, 1) != ESP_OK) {
-        return;
+        return false;
     }
-    i2c_reg_write(s_axp, AXP_INTEN2, en | AXP_PKEY_NEG);
-    i2c_reg_write(s_axp, AXP_INTSTS2, AXP_PKEY_NEG);        /* start clear */
+    if (i2c_reg_write(s_axp, AXP_INTEN2, en | AXP_PKEY_NEG) != ESP_OK ||
+        i2c_reg_read(s_axp, AXP_INTEN2, &check, 1) != ESP_OK || !(check & AXP_PKEY_NEG)) {
+        ESP_LOGW(TAG, "power-key latch not enabled (0x41 = 0x%02X)", check);
+        return false;
+    }
+    if (i2c_reg_write(s_axp, AXP_INTSTS2, AXP_PKEY_NEG) != ESP_OK) {   /* start clear */
+        return false;
+    }
+    ESP_LOGI(TAG, "power-key latch enabled (0x41 = 0x%02X)", check);
+    return true;
 }
 
 bool axp_pkey_pressed_latched(void)

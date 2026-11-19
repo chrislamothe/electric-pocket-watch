@@ -79,7 +79,7 @@ void app_main(void)
     } else {
         axp_configure_power_key();
 #if BOARD_PWR_POLL_MS > 0
-        axp_pkey_latch_enable();                /* PWR not on a GPIO: the PMIC latches presses */
+        controller_set_pwr_latch(axp_pkey_latch_enable());   /* PWR not on a GPIO: PMIC latches presses */
 #endif
         battlog_init();
         battlog_sample("boot");

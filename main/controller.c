@@ -345,6 +345,15 @@ static void run_screen_on(void)
 static bool s_ignore_boot, s_ignore_pwr;
 static uint32_t s_false_wakes;
 static bool s_pwr_latched;           /* PMIC saw a PWR press since the last poll */
+static bool s_pwr_latch_ok;          /* latch confirmed at boot (1.75 / 1.75-B) */
+
+void controller_set_pwr_latch(bool ok)
+{
+    s_pwr_latch_ok = ok;
+    if (!ok) {
+        ESP_LOGW(TAG, "PWR latch unavailable: polling PWR every 200 ms");
+    }
+}
 
 static wake_src_t wake_pins(void)
 {
@@ -370,8 +379,11 @@ static wake_src_t wake_pins(void)
 static bool wake_confirmed(wake_src_t w)
 {
     if (w == WAKE_PWR && s_pwr_latched) {
+        /* Pressed and already released: the level can no longer be checked. Whether contact bounce
+         * or noise alone can set the latch is not verified on hardware; false PWR wakes show in
+         * the wake counts on Settings > System. */
         s_pwr_latched = false;
-        return true;                                 /* the PMIC debounced it */
+        return true;
     }
     for (int i = 0; i < 5; i++) {
         vTaskDelay(pdMS_TO_TICKS(10));
@@ -423,8 +435,9 @@ static wake_src_t wait_for_wake(void)
             wake_us = 1000000;                                  /* look for the stuck button's release */
         }
 #if BOARD_PWR_POLL_MS > 0
-        if (wake_us > (uint64_t)BOARD_PWR_POLL_MS * 1000) {
-            wake_us = (uint64_t)BOARD_PWR_POLL_MS * 1000;       /* read PWR (not a wake pin) */
+        const uint64_t poll_us = (uint64_t)(s_pwr_latch_ok ? BOARD_PWR_POLL_MS : 200) * 1000;
+        if (wake_us > poll_us) {
+            wake_us = poll_us;                                   /* read PWR (not a wake pin) */
         }
 #endif
         esp_sleep_enable_timer_wakeup(wake_us);
@@ -445,7 +458,7 @@ static wake_src_t wait_for_wake(void)
     }
     wake_src_t w = wake_pins();
 #if BOARD_PWR_POLL_MS > 0
-    if (w == WAKE_NONE && axp_pkey_pressed_latched()) {
+    if (w == WAKE_NONE && s_pwr_latch_ok && axp_pkey_pressed_latched()) {
         s_pwr_latched = true;                        /* pressed and released between polls */
         w = WAKE_PWR;
     }
@@ -470,6 +483,7 @@ static void run_screen_off(void)
         ESP_LOGW(TAG, "PWR reads pressed 3 s after screen off: ignored until released");
     }
 #if BOARD_PWR_POLL_MS > 0
+    vTaskDelay(pdMS_TO_TICKS(50));                   /* let release bounce settle first */
     axp_pkey_pressed_latched();                      /* drop presses made while the screen was on */
     s_pwr_latched = false;
 #endif
