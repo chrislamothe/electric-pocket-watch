@@ -7,6 +7,13 @@
 
 static const char *TAG = "display";
 
+static esp_lcd_panel_io_handle_t s_io;
+
+esp_lcd_panel_io_handle_t display_panel_io(void)
+{
+    return s_io;
+}
+
 /* CO5300: window start on even, end on odd coordinates. */
 static void rounder_cb(lv_event_t *e)
 {
@@ -33,6 +40,7 @@ lv_display_t *display_start(void)
         ESP_LOGE(TAG, "panel start failed");
         return NULL;
     }
+    s_io = io;
     const esp_lv_adapter_display_config_t disp_cfg = {
         .panel = panel,
         .panel_io = io,

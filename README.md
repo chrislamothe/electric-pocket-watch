@@ -213,7 +213,8 @@ tools/wifi.py       command-line Improv client, for debugging
 - **Unused hardware** (v0.11.0): at power-on the touch controller is sent its sleep command, the
   accelerometer and both audio chips are powered down over I2C, and the speaker amplifier is
   held off (`main/parked.c`). No pin is latched. Battery effect not yet measured.
-- **Screen-off power**: while the screen is off the display panel is switched off (DISPOFF) and
+- **Screen-off power**: while the screen is off the display panel is in deep standby (its memory
+  is lost; on wake it is reset, re-initialised and redrawn before it lights, about 0.2 s) and
   the processor is in light sleep until BOOT or PWR. Settings > System shows how much of the
   screen-off time was spent in light sleep.
 - **Battery log**: Settings > System > Send log over USB prints the log as CSV (one record per

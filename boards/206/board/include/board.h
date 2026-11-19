@@ -9,6 +9,7 @@
  * AXP2101, QMI8658, PCF85063 RTC, vibration-motor driver. Pins from the V1.0 schematic.
  */
 #define BOARD_ID              "206"
+#define BOARD_PANEL_410x502   1     /* panel init sequence in main/lowpower.c */
 #define BOARD_NAME            "ESP32-S3-Touch-AMOLED-2.06"
 #define BOARD_SHORT           "2.06"
 

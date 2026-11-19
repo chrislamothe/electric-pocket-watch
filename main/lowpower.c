@@ -6,7 +6,12 @@
 #include "esp_log.h"
 #include "esp_timer.h"
 #include "bsp/esp-bsp.h"
-#include "display_dma.h"
+#include "display.h"
+#include "freertos/FreeRTOS.h"
+#include "freertos/task.h"
+#include "driver/gpio.h"
+#include "lvgl.h"
+#include "board.h"
 
 static const char *TAG = "lowpower";
 
@@ -16,32 +21,139 @@ static int64_t s_off_us, s_sleep_us;                 /* current period */
 static int64_t s_tot_off_us, s_tot_sleep_us;
 static uint32_t s_sleeps, s_rejected, s_tot_sleeps, s_tot_rejected;
 
-static void panel_on_off(bool on)
+/* ---------------------------------------------------------------- panel deep standby */
+
+/* CO5300 over QSPI: command byte in bits 15..8 of a 32-bit word, opcode 0x02 = write. */
+static esp_err_t panel_cmd(uint8_t cmd, const uint8_t *data, size_t len)
 {
-    esp_lcd_panel_handle_t panel = display_dma_panel();
-    if (!panel) {
-        return;
+    esp_lcd_panel_io_handle_t io = display_panel_io();
+    if (!io) {
+        return ESP_ERR_INVALID_STATE;
     }
-    /* Panel commands share the QSPI link with pixel data: send them under the display lock. */
-    if (bsp_display_lock(1000) != ESP_OK) {
-        ESP_LOGW(TAG, "display lock timeout: panel %s skipped", on ? "on" : "off");
-        return;
-    }
-    esp_err_t e = esp_lcd_panel_disp_on_off(panel, on);
-    bsp_display_unlock();
-    if (e != ESP_OK) {
-        ESP_LOGW(TAG, "panel %s failed: %s", on ? "on" : "off", esp_err_to_name(e));
-    }
+    return esp_lcd_panel_io_tx_param(io, (0x02 << 24) | ((uint32_t)cmd << 8), data, len);
 }
+
+typedef struct {
+    uint8_t cmd;
+    uint8_t len;
+    uint8_t data[4];
+    uint16_t delay_ms;
+} panel_init_t;
+
+/*
+ * Register set-up after a hardware reset: the board package's own sequence (Waveshare BSP for
+ * the 1.75 / 1.75C, main bsp_206.c for the 2.06) with three changes, so the wake takes ~0.2 s
+ * instead of ~1.4 s and never shows stale or random panel memory:
+ *   - brightness (0x51) 0 instead of 0xFF; the controller raises it after the first frame
+ *   - no DISPON (0x29) here; lowpower_screen_show() sends it once a full frame is in panel memory
+ *   - 120 ms after SLPOUT (the CO5300 driver's own default is 60 ms) instead of 2 x 600 ms
+ * MADCTL and COLMOD are written explicitly (normally sent by the panel driver's init).
+ */
+static const panel_init_t s_init[] = {
+#if defined(BOARD_PANEL_410x502)
+    {0x11, 0, {0}, 120},                             /* SLPOUT */
+    {0xC4, 1, {0x80}, 0},
+    {0x44, 2, {0x01, 0xD1}, 0},
+    {0x35, 1, {0x00}, 0},
+    {0x53, 1, {0x20}, 0},
+    {0x63, 1, {0xFF}, 0},
+    {0x51, 1, {0x00}, 0},
+    {0x36, 1, {0x00}, 0},
+    {0x3A, 1, {0x55}, 0},
+    {0x2A, 4, {0x00, 0x16, 0x01, 0xAF}, 0},
+    {0x2B, 4, {0x00, 0x00, 0x01, 0xF5}, 0},
+#else
+    {0xFE, 1, {0x20}, 0},
+    {0x19, 1, {0x10}, 0},
+    {0x1C, 1, {0xA0}, 0},
+    {0xFE, 1, {0x00}, 0},
+    {0xC4, 1, {0x80}, 0},
+    {0x36, 1, {0x00}, 0},
+    {0x3A, 1, {0x55}, 0},
+    {0x35, 1, {0x00}, 0},
+    {0x53, 1, {0x20}, 0},
+    {0x51, 1, {0x00}, 0},
+    {0x63, 1, {0xFF}, 0},
+    {0x2A, 4, {0x00, 0x06, 0x01, 0xD7}, 0},
+    {0x2B, 4, {0x00, 0x00, 0x01, 0xD1}, 0},
+    {0x11, 0, {0}, 120},                             /* SLPOUT */
+#endif
+};
+
+static bool s_standby;              /* panel in deep standby: memory lost, needs reset + init */
+static int64_t s_wake_us;
 
 void lowpower_screen_off(void)
 {
-    panel_on_off(false);
+    if (bsp_display_lock(1000) != ESP_OK) {
+        ESP_LOGW(TAG, "display lock timeout: panel left on");
+        return;
+    }
+    const uint8_t dstb = 0x01;
+    esp_err_t e = panel_cmd(0x28, NULL, 0);                  /* DISPOFF */
+    if (e == ESP_OK) {
+        e = panel_cmd(0x10, NULL, 0);                        /* SLPIN */
+    }
+    if (e == ESP_OK) {
+        vTaskDelay(pdMS_TO_TICKS(120));                      /* SLPIN settle before DSTB */
+        e = panel_cmd(0x4F, &dstb, 1);                       /* deep standby */
+    }
+    bsp_display_unlock();
+    /* The reset line stays driven high in light sleep: a floating reset would only matter on
+     * wake, but keep the pin defined. Deep standby is left by a reset pulse. */
+    gpio_sleep_sel_dis(BSP_LCD_RST);
+    if (e == ESP_OK) {
+        s_standby = true;
+    } else {
+        ESP_LOGW(TAG, "panel deep standby failed: %s", esp_err_to_name(e));
+    }
 }
 
 void lowpower_screen_on(void)
 {
-    panel_on_off(true);
+    s_wake_us = esp_timer_get_time();
+    if (!s_standby) {
+        return;
+    }
+    if (bsp_display_lock(1000) != ESP_OK) {
+        ESP_LOGW(TAG, "display lock timeout: panel wake skipped");
+        return;
+    }
+    gpio_set_level(BSP_LCD_RST, 0);
+    vTaskDelay(pdMS_TO_TICKS(10));
+    gpio_set_level(BSP_LCD_RST, 1);
+    vTaskDelay(pdMS_TO_TICKS(30));
+    esp_err_t e = ESP_OK;
+    for (size_t i = 0; i < sizeof(s_init) / sizeof(s_init[0]) && e == ESP_OK; i++) {
+        e = panel_cmd(s_init[i].cmd, s_init[i].len ? s_init[i].data : NULL, s_init[i].len);
+        if (s_init[i].delay_ms) {
+            vTaskDelay(pdMS_TO_TICKS(s_init[i].delay_ms));
+        }
+    }
+    bsp_display_unlock();
+    s_standby = false;
+    if (e != ESP_OK) {
+        ESP_LOGW(TAG, "panel wake failed: %s", esp_err_to_name(e));
+    }
+}
+
+void lowpower_screen_show(void)
+{
+    if (bsp_display_lock(1000) != ESP_OK) {
+        ESP_LOGW(TAG, "display lock timeout: DISPON skipped");
+        return;
+    }
+    /* The panel memory was lost in deep standby: redraw everything before the display goes on. */
+    lv_obj_invalidate(lv_screen_active());
+    lv_obj_invalidate(lv_layer_top());
+    lv_refr_now(NULL);
+    bsp_display_unlock();
+    vTaskDelay(pdMS_TO_TICKS(20));                           /* last strip leaves the DMA */
+    if (bsp_display_lock(1000) == ESP_OK) {
+        panel_cmd(0x29, NULL, 0);                            /* DISPON */
+        bsp_display_unlock();
+    }
+    ESP_LOGI(TAG, "panel on %d ms after wake", (int)((esp_timer_get_time() - s_wake_us) / 1000));
 }
 
 void lowpower_off_begin(void)

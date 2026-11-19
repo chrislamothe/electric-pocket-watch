@@ -132,13 +132,13 @@ static void screen_on(const char *why)
              axp_vbus_good(), (unsigned)heap_caps_get_free_size(MALLOC_CAP_INTERNAL | MALLOC_CAP_DMA),
              (unsigned)heap_caps_get_largest_free_block(MALLOC_CAP_INTERNAL | MALLOC_CAP_DMA));
     lowpower_off_end();
-    lowpower_screen_on();                            /* panel DISPON */
+    lowpower_screen_on();                            /* panel out of deep standby, still dark */
     if (s_lvgl_paused) {
         esp_lv_adapter_resume();                     /* restart the LVGL worker and its tick */
         s_lvgl_paused = false;
     }
     faces_set_active(true);                          /* draws the current time first */
-    vTaskDelay(pdMS_TO_TICKS(60));                   /* let that frame reach the panel */
+    lowpower_screen_show();                          /* full frame in panel memory, then DISPON */
     s_bright = settings_get_int("bright", CONFIG_WATCH_BRIGHTNESS);
     set_brightness(s_bright);
     s_dimmed = false;
@@ -163,7 +163,7 @@ static void screen_off(const char *why)
     } else {
         ESP_LOGW(TAG, "LVGL pause timed out");
     }
-    lowpower_screen_off();                           /* panel DISPOFF */
+    lowpower_screen_off();                           /* panel deep standby */
     lowpower_off_begin();
     s_screen_on = false;
 }

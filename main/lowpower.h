@@ -7,9 +7,9 @@
 /*
  * Screen-off power savings and sleep accounting.
  *
- * - Display panel: DISPOFF while dark, DISPON on wake (the frame memory is kept; no re-init). The
- *   driver's own sleep call is not used: on this board it enters deep standby, and leaving that
- *   re-runs the panel init sequence, about 1.4 s.
+ * - Display panel: deep standby while dark (DISPOFF, SLPIN, DSTB). Its memory is lost, so
+ *   lowpower_screen_on() resets and re-initialises it (~0.2 s, display still off, brightness 0)
+ *   and lowpower_screen_show() redraws the whole screen before DISPON.
  * - Hardware the watch never uses (touch, accelerometer, audio) is powered down once at boot by
  *   main/parked.c, not here.
  *
@@ -17,7 +17,8 @@
  * a sleep attempt was rejected. Call with the LVGL worker paused (screen off) or not yet resumed.
  */
 void lowpower_screen_off(void);
-void lowpower_screen_on(void);
+void lowpower_screen_on(void);              /* panel out of deep standby, still dark */
+void lowpower_screen_show(void);            /* full redraw, then DISPON; LVGL running */
 
 void lowpower_sleep_begin(void);             /* around esp_light_sleep_start() */
 void lowpower_sleep_end(bool slept);
