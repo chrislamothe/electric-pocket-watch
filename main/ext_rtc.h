@@ -19,5 +19,11 @@ bool ext_rtc_present(void);
  * Returns true if it did. */
 bool ext_rtc_restore_system_time(void);
 
-/* Writes the current system time (after an NTP sync). */
+/* Writes the current system time, aligned to the second (after an NTP sync). Takes up to 1 s. */
 void ext_rtc_save_system_time(void);
+
+/* Steps the system clock to the RTC (the ESP32's sleep clock is an RC oscillator; the RTC is quartz).
+ * Takes up to 1 s. Returns true if the clock was corrected. */
+#define EXT_RTC_SYNC_PERIOD_S 3600
+bool ext_rtc_sync_system_time(void);
+void ext_rtc_sync_if_due(void);                 /* hourly; call from the periodic battery-log points */

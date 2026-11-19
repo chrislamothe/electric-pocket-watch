@@ -18,6 +18,7 @@
 #include "settings.h"
 #include "settings_ui.h"
 #include "touch.h"
+#include "ext_rtc.h"
 #include "splash.h"
 #include "lowpower.h"
 
@@ -297,6 +298,7 @@ static void run_screen_on(void)
             }
             if (battlog_due()) {
                 battlog_sample("awake");             /* keeps logging with the screen always on */
+                ext_rtc_sync_if_due();
                 if (s_awake_ms == 0) {
                     axp_rest_set_loaded(axp_battery_mv());   /* always on: no dark reading exists */
                     check_empty(axp_rest_mv());
@@ -440,6 +442,7 @@ static wake_src_t wait_for_wake(void)
     if (w == WAKE_NONE && battlog_due()) {
         battlog_sample(light ? "sleep" : "idle");
         check_empty(axp_rest_mv());
+        ext_rtc_sync_if_due();                       /* keep the RC-clocked system time on the RTC */
     }
     return w;
 }
