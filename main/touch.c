@@ -15,7 +15,9 @@ static const char *TAG = "touch";
 static i2c_master_dev_handle_t s_dev;
 static TaskHandle_t s_task;
 static volatile bool s_want;        /* requested state */
-static volatile bool s_awake;       /* chip state */
+static volatile bool s_awake;       /* chip state: scanning */
+static volatile bool s_need_sleep;  /* sleep command not yet confirmed (boot, or a failed attempt) */
+static uint32_t s_sleep_failures;
 static volatile bool s_pressed;
 static volatile int16_t s_x, s_y;
 
@@ -84,6 +86,21 @@ static bool chip_read(bool *pressed, int *x, int *y)
     return true;
 }
 
+/* Reset pulse (the chip ignores I2C while asleep) and sleep command, up to 3 attempts. */
+static bool put_to_sleep(void)
+{
+    for (int i = 0; i < 3; i++) {
+        reset_pulse();
+        esp_err_t e = chip_sleep();
+        if (e == ESP_OK) {
+            return true;
+        }
+        ESP_LOGW(TAG, "sleep command failed (attempt %d): %s", i + 1, esp_err_to_name(e));
+    }
+    s_sleep_failures++;
+    return false;
+}
+
 static void touch_task(void *arg)
 {
     (void)arg;
@@ -92,20 +109,22 @@ static void touch_task(void *arg)
         if (s_want && !s_awake) {
             reset_pulse();
             misses = 0;
+            s_need_sleep = false;
             s_awake = true;
             ESP_LOGI(TAG, "touch on");
-        } else if (!s_want && s_awake) {
+        } else if (!s_want && (s_awake || s_need_sleep)) {
             s_pressed = false;
-            esp_err_t e = chip_sleep();
             s_awake = false;
-            if (e == ESP_OK) {
-                ESP_LOGI(TAG, "touch off (controller asleep)");
+            s_need_sleep = !put_to_sleep();          /* retried at the next screen off if it failed */
+            if (!s_need_sleep) {
+                ESP_LOGI(TAG, "touch controller asleep");
             } else {
-                ESP_LOGW(TAG, "touch off: sleep command failed: %s", esp_err_to_name(e));
+                ESP_LOGE(TAG, "touch controller may still be awake (%lu failed sleeps)",
+                         (unsigned long)s_sleep_failures);
             }
         }
         if (!s_awake) {
-            ulTaskNotifyTake(pdTRUE, portMAX_DELAY);    /* nothing to do until touch is wanted */
+            ulTaskNotifyTake(pdTRUE, portMAX_DELAY);    /* nothing to do until asked */
             continue;
         }
         bool pressed = false;
@@ -155,14 +174,9 @@ void touch_init(i2c_master_bus_handle_t bus)
         ESP_LOGW(TAG, "I2C device not added: no touch");
         return;
     }
-    /* The chip may be awake (power-on) or asleep (ESP32 reset): reset, then sleep. */
-    reset_pulse();
-    esp_err_t e = chip_sleep();
-    if (e == ESP_OK) {
-        ESP_LOGI(TAG, "touch controller asleep (wakes for the Settings menu)");
-    } else {
-        ESP_LOGW(TAG, "touch controller did not take the sleep command: %s", esp_err_to_name(e));
-    }
+    /* The chip may be awake (power-on) or asleep (ESP32 reset): the task resets it and sends the
+     * sleep command, verified and retried, before anything else. */
+    s_need_sleep = true;
 
     if (bsp_display_lock(1000) == ESP_OK) {
         lv_indev_t *indev = lv_indev_create();
@@ -183,7 +197,16 @@ void touch_set_active(bool on)
 
 void touch_wait_settled(int max_ms)
 {
-    for (int t = 0; s_task && s_awake != s_want && t < max_ms; t += 5) {
+    if (s_task && !s_want) {
+        xTaskNotifyGive(s_task);                        /* also retries a failed sleep */
+    }
+    for (int t = 0; s_task && (s_awake != s_want || (!s_want && s_need_sleep && s_sleep_failures == 0)) &&
+                    t < max_ms; t += 5) {
         vTaskDelay(pdMS_TO_TICKS(5));
     }
+}
+
+uint32_t touch_sleep_failures(void)
+{
+    return s_sleep_failures;
 }

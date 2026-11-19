@@ -7,6 +7,7 @@
 #include "esp_timer.h"
 #include "bsp/esp-bsp.h"
 #include "display.h"
+#include "touch.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 #include "driver/gpio.h"
@@ -83,12 +84,10 @@ static const panel_init_t s_init[] = {
 static bool s_standby;              /* panel in deep standby: memory lost, needs reset + init */
 static int64_t s_wake_us;
 
-void lowpower_screen_off(void)
+static uint32_t s_standby_failures, s_wake_failures;
+
+static esp_err_t enter_standby(void)
 {
-    if (bsp_display_lock(1000) != ESP_OK) {
-        ESP_LOGW(TAG, "display lock timeout: panel left on");
-        return;
-    }
     const uint8_t dstb = 0x01;
     esp_err_t e = panel_cmd(0x28, NULL, 0);                  /* DISPOFF */
     if (e == ESP_OK) {
@@ -98,27 +97,11 @@ void lowpower_screen_off(void)
         vTaskDelay(pdMS_TO_TICKS(120));                      /* SLPIN settle before DSTB */
         e = panel_cmd(0x4F, &dstb, 1);                       /* deep standby */
     }
-    bsp_display_unlock();
-    /* The reset line stays driven high in light sleep: a floating reset would only matter on
-     * wake, but keep the pin defined. Deep standby is left by a reset pulse. */
-    gpio_sleep_sel_dis(BSP_LCD_RST);
-    if (e == ESP_OK) {
-        s_standby = true;
-    } else {
-        ESP_LOGW(TAG, "panel deep standby failed: %s", esp_err_to_name(e));
-    }
+    return e;
 }
 
-void lowpower_screen_on(void)
+static esp_err_t reset_and_init(void)
 {
-    s_wake_us = esp_timer_get_time();
-    if (!s_standby) {
-        return;
-    }
-    if (bsp_display_lock(1000) != ESP_OK) {
-        ESP_LOGW(TAG, "display lock timeout: panel wake skipped");
-        return;
-    }
     gpio_set_level(BSP_LCD_RST, 0);
     vTaskDelay(pdMS_TO_TICKS(10));
     gpio_set_level(BSP_LCD_RST, 1);
@@ -130,10 +113,53 @@ void lowpower_screen_on(void)
             vTaskDelay(pdMS_TO_TICKS(s_init[i].delay_ms));
         }
     }
-    bsp_display_unlock();
-    s_standby = false;
+    return e;
+}
+
+void lowpower_screen_off(void)
+{
+    gpio_sleep_sel_dis(BSP_LCD_RST);                         /* reset line stays driven in light sleep */
+    if (bsp_display_lock(1000) != ESP_OK) {
+        s_standby_failures++;
+        ESP_LOGE(TAG, "display lock timeout: panel not in standby (%lu failures)", (unsigned long)s_standby_failures);
+        return;
+    }
+    esp_err_t e = enter_standby();
     if (e != ESP_OK) {
-        ESP_LOGW(TAG, "panel wake failed: %s", esp_err_to_name(e));
+        ESP_LOGW(TAG, "panel standby failed (%s): retrying", esp_err_to_name(e));
+        e = enter_standby();
+    }
+    bsp_display_unlock();
+    /* Even a partly failed sequence may have reached SLPIN/DSTB: always re-initialise on wake. */
+    s_standby = true;
+    if (e != ESP_OK) {
+        s_standby_failures++;
+        ESP_LOGE(TAG, "panel standby failed: %s (%lu failures)", esp_err_to_name(e), (unsigned long)s_standby_failures);
+    }
+}
+
+void lowpower_screen_on(void)
+{
+    s_wake_us = esp_timer_get_time();
+    if (!s_standby) {
+        return;
+    }
+    if (bsp_display_lock(1000) != ESP_OK) {
+        s_wake_failures++;
+        ESP_LOGE(TAG, "display lock timeout: panel wake skipped (stays flagged for the next wake)");
+        return;
+    }
+    esp_err_t e = reset_and_init();
+    if (e != ESP_OK) {
+        ESP_LOGW(TAG, "panel wake failed (%s): retrying", esp_err_to_name(e));
+        e = reset_and_init();
+    }
+    bsp_display_unlock();
+    if (e == ESP_OK) {
+        s_standby = false;
+    } else {
+        s_wake_failures++;                                   /* s_standby stays set: full init next time */
+        ESP_LOGE(TAG, "panel wake failed: %s (%lu failures)", esp_err_to_name(e), (unsigned long)s_wake_failures);
     }
 }
 
@@ -200,7 +226,12 @@ void lowpower_summary(char *buf, size_t len)
         snprintf(buf, len, "Light sleep: no screen-off time yet");
         return;
     }
-    snprintf(buf, len, "Light sleep: %.1f%% of %.1f h off\n%lu sleeps, %lu rejected",
-             100.0 * s_tot_sleep_us / s_tot_off_us, s_tot_off_us / 3.6e9, (unsigned long)s_tot_sleeps,
-             (unsigned long)s_tot_rejected);
+    int n = snprintf(buf, len, "Light sleep: %.1f%% of %.1f h off\n%lu sleeps, %lu rejected",
+                     100.0 * s_tot_sleep_us / s_tot_off_us, s_tot_off_us / 3.6e9, (unsigned long)s_tot_sleeps,
+                     (unsigned long)s_tot_rejected);
+    uint32_t tf = touch_sleep_failures();
+    if ((s_standby_failures || s_wake_failures || tf) && n > 0 && (size_t)n < len) {
+        snprintf(buf + n, len - n, "\nFailures: panel off %lu, panel on %lu, touch sleep %lu",
+                 (unsigned long)s_standby_failures, (unsigned long)s_wake_failures, (unsigned long)tf);
+    }
 }

@@ -23,7 +23,7 @@
 
 #define BOARD_PIN_BOOT        0     /* active low, 10K pull-up */
 #define BOARD_PIN_PWR         -1    /* SYS_OUT on TCA9554 P4 */
-#define BOARD_PWR_POLL_MS     200
+#define BOARD_PWR_POLL_MS     1000  /* the PMIC latches presses in between (axp_pkey_pressed_latched) */
 #define BOARD_PIN_IMU_INT     21    /* QMI8658 INT2; unused, pulled down */
 #define BOARD_PIN_TOUCH_RST   BSP_LCD_TOUCH_RST     /* GPIO40 */
 #define BOARD_TOUCH_CHIP      9217  /* CST9217: asleep except in Settings (main/touch.c) */

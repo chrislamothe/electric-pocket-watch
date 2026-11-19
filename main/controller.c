@@ -344,6 +344,7 @@ static void run_screen_on(void)
  * waking the screen over and over. */
 static bool s_ignore_boot, s_ignore_pwr;
 static uint32_t s_false_wakes;
+static bool s_pwr_latched;           /* PMIC saw a PWR press since the last poll */
 
 static wake_src_t wake_pins(void)
 {
@@ -368,6 +369,10 @@ static wake_src_t wake_pins(void)
 /* A press must hold for 50 ms to count: a glitch on a button pin does not light the screen. */
 static bool wake_confirmed(wake_src_t w)
 {
+    if (w == WAKE_PWR && s_pwr_latched) {
+        s_pwr_latched = false;
+        return true;                                 /* the PMIC debounced it */
+    }
     for (int i = 0; i < 5; i++) {
         vTaskDelay(pdMS_TO_TICKS(10));
         if (wake_pins() != w) {
@@ -439,6 +444,12 @@ static wake_src_t wait_for_wake(void)
         }
     }
     wake_src_t w = wake_pins();
+#if BOARD_PWR_POLL_MS > 0
+    if (w == WAKE_NONE && axp_pkey_pressed_latched()) {
+        s_pwr_latched = true;                        /* pressed and released between polls */
+        w = WAKE_PWR;
+    }
+#endif
     if (w == WAKE_NONE && battlog_due()) {
         battlog_sample(light ? "sleep" : "idle");
         check_empty(axp_rest_mv());
@@ -458,6 +469,10 @@ static void run_screen_off(void)
         s_ignore_pwr = true;
         ESP_LOGW(TAG, "PWR reads pressed 3 s after screen off: ignored until released");
     }
+#if BOARD_PWR_POLL_MS > 0
+    axp_pkey_pressed_latched();                      /* drop presses made while the screen was on */
+    s_pwr_latched = false;
+#endif
     while (!s_screen_on) {
         wake_src_t w = wait_for_wake();
         if (vbus_poll() && settings_get_int("chg_on", 1)) {

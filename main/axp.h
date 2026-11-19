@@ -52,3 +52,7 @@ int axp_mv_to_percent(int mv);
 int axp_power_on_source(void);       /* raw 0x20, -1 on error */
 int axp_power_off_source(void);      /* raw 0x21, -1 on error */
 void axp_power_off(void);            /* PMIC turns every rail off; USB or the PWR key powers on again */
+
+/* Power-key press latched by the PMIC (for boards where PWR is not on a wake-capable GPIO). */
+void axp_pkey_latch_enable(void);
+bool axp_pkey_pressed_latched(void);        /* true once per press; clears the latch */

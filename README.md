@@ -204,24 +204,27 @@ tools/wifi.py       command-line Improv client, for debugging
 
 ## Status and known limits
 
-- **Battery** (measured on the 1.75C, v0.8.3 to v0.8.6): about 6 h with the screen always on,
-  48.5 h from full with the screen off. Charging from 20 % takes about 1 h 45 min. The percentage
+- **Battery** (measured on the 1.75C): screen off, full to empty, **75.1 h on v0.11.1**
+  (48.5 h on v0.8.6); about 6 h with the screen always on (v0.8.x). Not yet re-measured since
+  panel deep standby (v0.13.0). Charging from 20 % takes about 1 h 45 min. The percentage
   comes from a voltage curve measured on that cell; other boards use the same curve (single-cell
   LiPo shape) until measured, so expect a few points of error there. Below 3.35 V the watch shows "Battery empty" and powers
-  itself off; USB or the PWR key turns it on again. The screen-off drain is still about 14 % of the
-  screen-on drain, far above what light sleep should cost: work in progress.
-- **Unused hardware** (v0.11.0): at power-on the touch controller is sent its sleep command, the
-  accelerometer and both audio chips are powered down over I2C, and the speaker amplifier is
-  held off (`main/parked.c`). No pin is latched. Battery effect not yet measured.
+  itself off; USB or the PWR key turns it on again.
+- **Unused hardware** (v0.11.0): the accelerometer and both audio chips are powered down over I2C
+  and the speaker amplifier is held off (`main/parked.c`). The touch controller sleeps except
+  while Settings is open; its sleep command is verified and retried (`main/touch.c`). No pin is
+  latched with gpio_hold.
 - **Screen-off power**: while the screen is off the display panel is in deep standby (its memory
   is lost; on wake it is reset, re-initialised and redrawn before it lights, about 0.2 s) and
   the processor is in light sleep until BOOT or PWR. Settings > System shows how much of the
-  screen-off time was spent in light sleep.
+  screen-off time the processor spent in light sleep (not the current drawn), and any failed
+  panel or touch power transitions.
 - **Battery log**: Settings > System > Send log over USB prints the log as CSV (one record per
   15 min, every 2 min below 3.5 V, with reset and power-off reasons at each boot).
-- **1.75 / 1.75-B**: polling the PWR button every 200 ms while the screen is off costs some
-  standby time (not yet measured). BOOT wakes without it.
-- Not yet measured: clock drift between syncs.
+- **1.75 / 1.75-B**: PWR is not on a wake-capable pin, so the watch wakes once a second to read
+  it; the PMIC latches presses in between, so a short tap still wakes it (within 1 s). BOOT wakes
+  at once. The system clock is corrected from the PCF85063 every hour (v0.13.1).
+- **1.75C**: no clock chip; the clock drifts ~10 s/day (ESP32 RC oscillator) until a Wi-Fi sync.
 - Planned: hinged-lid opening animation, time-zone setting, alarm with chime.
 
 ## License

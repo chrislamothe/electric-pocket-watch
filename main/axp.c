@@ -177,6 +177,33 @@ void axp_configure_power_key(void)
     ESP_LOGI(TAG, "power key: 0x22=%02X 0x27=%02X (hold PWR %d s to power off)", en, lvl, 4 + 2 * ((lvl >> 2) & 3));
 }
 
+/* Power-key press latch. AXP2101 IRQ enable 2 (0x41) bit 1 = POWERON negative edge (key pressed),
+ * status 2 (0x49) same bit, write 1 to clear (XPowersLib AXP2101 IRQ map). The status bit latches
+ * whether or not the IRQ pin reaches the ESP32, so a press is not missed between slow polls. */
+#define AXP_INTEN2   0x41
+#define AXP_INTSTS2  0x49
+#define AXP_PKEY_NEG 0x02
+
+void axp_pkey_latch_enable(void)
+{
+    uint8_t en = 0;
+    if (!s_axp || i2c_reg_read(s_axp, AXP_INTEN2, &en, 1) != ESP_OK) {
+        return;
+    }
+    i2c_reg_write(s_axp, AXP_INTEN2, en | AXP_PKEY_NEG);
+    i2c_reg_write(s_axp, AXP_INTSTS2, AXP_PKEY_NEG);        /* start clear */
+}
+
+bool axp_pkey_pressed_latched(void)
+{
+    uint8_t st = 0;
+    if (!s_axp || i2c_reg_read(s_axp, AXP_INTSTS2, &st, 1) != ESP_OK || !(st & AXP_PKEY_NEG)) {
+        return false;
+    }
+    i2c_reg_write(s_axp, AXP_INTSTS2, AXP_PKEY_NEG);
+    return true;
+}
+
 static int s_rest_mv = -1;
 
 void axp_rest_update(void)

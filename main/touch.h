@@ -1,6 +1,7 @@
 #pragma once
 
 #include <stdbool.h>
+#include <stdint.h>
 #include "driver/i2c_master.h"
 
 /*
@@ -24,3 +25,6 @@ void touch_set_active(bool on);
 
 /* Wait until the chip has reached the requested state (used before light sleep). */
 void touch_wait_settled(int max_ms);
+
+/* Times the sleep command failed after 3 attempts (shown on Settings > System). */
+uint32_t touch_sleep_failures(void);
