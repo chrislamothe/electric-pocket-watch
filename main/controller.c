@@ -18,7 +18,7 @@
 #include "settings.h"
 #include "settings_ui.h"
 #include "touch.h"
-#include "ext_rtc.h"
+#include "timesvc.h"
 #include "splash.h"
 #include "lowpower.h"
 
@@ -138,6 +138,7 @@ static void screen_on(const char *why)
         esp_lv_adapter_resume();                     /* restart the LVGL worker and its tick */
         s_lvgl_paused = false;
     }
+    timesvc_on_wake();                               /* RTC check before any time is drawn */
     faces_set_active(true);                          /* draws the current time first */
     lowpower_screen_show();                          /* full frame in panel memory, then DISPON */
     s_bright = settings_get_int("bright", CONFIG_WATCH_BRIGHTNESS);
@@ -287,8 +288,8 @@ static void run_screen_on(void)
         default:
             break;
         }
-        if (settings_ui_busy() || net_busy()) {
-            touch_activity();                        /* keep the screen on during Wi-Fi work */
+        if (settings_ui_busy()) {
+            touch_activity();                        /* keep the screen on during a Settings job */
         }
         if ((++n % 20) == 0) {                       /* every ~200 ms */
             uint32_t idle = 0;
@@ -296,9 +297,11 @@ static void run_screen_on(void)
                 idle = lv_display_get_inactive_time(NULL);
                 bsp_display_unlock();
             }
+            if (timesvc_us_until_due() == 0) {
+                timesvc_service();                   /* screen kept on (charging, always on) */
+            }
             if (battlog_due()) {
                 battlog_sample("awake");             /* keeps logging with the screen always on */
-                ext_rtc_sync_if_due();
                 if (s_awake_ms == 0) {
                     axp_rest_set_loaded(axp_battery_mv());   /* always on: no dark reading exists */
                     check_empty(axp_rest_mv());
@@ -431,6 +434,10 @@ static wake_src_t wait_for_wake(void)
 #endif
         esp_sleep_enable_gpio_wakeup();
         uint64_t wake_us = battlog_us_until_due();              /* battery log sample */
+        uint64_t time_us = timesvc_us_until_due();              /* clock maintenance */
+        if (time_us < wake_us) {
+            wake_us = time_us < 1000 ? 1000 : time_us;
+        }
         if ((s_ignore_boot || s_ignore_pwr) && wake_us > 1000000) {
             wake_us = 1000000;                                  /* look for the stuck button's release */
         }
@@ -466,7 +473,9 @@ static wake_src_t wait_for_wake(void)
     if (w == WAKE_NONE && battlog_due()) {
         battlog_sample(light ? "sleep" : "idle");
         check_empty(axp_rest_mv());
-        ext_rtc_sync_if_due();                       /* keep the RC-clocked system time on the RTC */
+    }
+    if (w == WAKE_NONE) {
+        timesvc_service();                           /* RTC correction, drift, automatic sync */
     }
     return w;
 }

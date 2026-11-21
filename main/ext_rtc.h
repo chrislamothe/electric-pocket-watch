@@ -1,29 +1,28 @@
 #pragma once
 
 #include <stdbool.h>
-#include <time.h>
+#include <stdint.h>
 #include "driver/i2c_master.h"
 
 /*
- * PCF85063 real-time clock (I2C 0x51) on the 1.75 / 1.75-B and 2.06. It runs from the AXP2101's
- * always-on RTC supply, so it keeps time while the watch is powered off. Detected at start-up;
- * on boards without it (1.75C) every call is a no-op.
+ * PCF85063 real-time clock (I2C 0x51) on the 1.75 / 1.75-B and 2.06: quartz crystal, powered from
+ * the AXP2101's always-on supply, so it keeps time while the watch is off. Absent on the 1.75C.
  *
- * Kept in UTC. Registers 0x04..0x0A are BCD seconds..years; seconds bit 7 (OS) is set when the
- * oscillator stopped (e.g. the battery was disconnected), meaning the time is not trustworthy.
+ * Hardware access only. Which clock is trusted, when to correct and from what source is decided
+ * by main/timesvc.c, which serialises every call here. Kept in UTC, 24-hour mode.
  */
 bool ext_rtc_init(i2c_master_bus_handle_t bus);
 bool ext_rtc_present(void);
 
-/* When the system clock is unset (cold boot), sets it from the RTC if the RTC holds a valid time.
- * Returns true if it did. */
-bool ext_rtc_restore_system_time(void);
+/* Whole-second read. False if absent, unreadable, oscillator-stop flag set, stopped at boot and
+ * not rewritten since, or an impossible date. */
+bool ext_rtc_read(long long *utc_s);
 
-/* Writes the current system time, aligned to the second (after an NTP sync). Takes up to 1 s. */
-void ext_rtc_save_system_time(void);
+/* Waits for the seconds register to change (up to 1.2 s) and returns the new second together with
+ * the esp_timer time of that change (+-1 ms). */
+bool ext_rtc_read_edge(long long *utc_s, int64_t *mono_us);
 
-/* Steps the system clock to the RTC (the ESP32's sleep clock is an RC oscillator; the RTC is quartz).
- * Takes up to 1 s. Returns true if the clock was corrected. */
-#define EXT_RTC_SYNC_PERIOD_S 3600
-bool ext_rtc_sync_system_time(void);
-void ext_rtc_sync_if_due(void);                 /* hourly; call from the periodic battery-log points */
+/* Loads the given UTC time, aligned to the second: the clock is stopped, loaded with second S and
+ * released at S + 0.492 s (first increment 0.5078 s after release, PCF85063A datasheet 8.2.1.4),
+ * then checked to have ticked to S+1. utc_now_us() supplies the reference. Up to ~1.7 s. */
+bool ext_rtc_write_aligned(int64_t (*utc_now_us)(void));

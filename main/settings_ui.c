@@ -26,6 +26,7 @@
  */
 #include "settings_ui.h"
 #include "touch.h"
+#include "timesvc.h"
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -573,13 +574,18 @@ static void build_display(void)
 static void build_system(void)
 {
     frame("System", 320);
-    char buf[512];
+    char buf[768];
     int o = snprintf(buf, sizeof(buf), "%s %s (%s)\n", WATCH_NAME, WATCH_VERSION, BOARD_SHORT);
     battlog_summary(buf + o, sizeof(buf) - o);
     o = (int)strlen(buf);
     if (o < (int)sizeof(buf) - 2) {
         buf[o++] = '\n';
         lowpower_summary(buf + o, sizeof(buf) - o);
+        o = (int)strlen(buf);
+    }
+    if (o < (int)sizeof(buf) - 2) {
+        buf[o++] = '\n';
+        timesvc_summary(buf + o, sizeof(buf) - o);
     }
     lv_obj_t *info = label(s_list, buf, &lv_font_montserrat_16, COL_TEXT);
     lv_obj_set_width(info, lv_pct(100));

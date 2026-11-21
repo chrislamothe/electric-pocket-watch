@@ -1,9 +1,10 @@
 #include "ext_rtc.h"
 
-#include <sys/time.h>
 #include "esp_log.h"
+#include "esp_timer.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
+#include <time.h>
 
 static const char *TAG = "rtc";
 
@@ -16,13 +17,12 @@ static const char *TAG = "rtc";
 #define VALID_FROM      1704067200LL    /* 2024-01-01 UTC */
 
 static i2c_master_dev_handle_t s_dev;
-static int64_t s_last_sync_us;      /* system time of the last RTC write or correction */
+static bool s_stale;                /* found stopped at boot: frozen time, invalid until written */
 
 static uint8_t bcd2bin(uint8_t v) { return (uint8_t)((v >> 4) * 10 + (v & 0x0F)); }
 static uint8_t bin2bcd(int v) { return (uint8_t)(((v / 10) << 4) | (v % 10)); }
 
-/* Days since 1970-01-01 for a proleptic Gregorian date (H. Hinnant's days_from_civil). Avoids
- * mktime(), which depends on the TZ setting. */
+/* Days since 1970-01-01 (H. Hinnant's days_from_civil); independent of TZ. */
 static long long days_from_civil(int y, int m, int d)
 {
     y -= m <= 2;
@@ -43,6 +43,20 @@ static bool wr(const uint8_t *buf, size_t n)
     return s_dev && i2c_master_transmit(s_dev, buf, n, 100) == ESP_OK;
 }
 
+static bool regs_to_utc(const uint8_t r[7], long long *out)
+{
+    if (r[0] & SECONDS_OS) {
+        return false;
+    }
+    int sec = bcd2bin(r[0] & 0x7F), min = bcd2bin(r[1] & 0x7F), hour = bcd2bin(r[2] & 0x3F);
+    int day = bcd2bin(r[3] & 0x3F), mon = bcd2bin(r[5] & 0x1F), year = 2000 + bcd2bin(r[6]);
+    if (mon < 1 || mon > 12 || day < 1 || day > 31 || hour > 23 || min > 59 || sec > 59) {
+        return false;
+    }
+    *out = days_from_civil(year, mon, day) * 86400LL + hour * 3600 + min * 60 + sec;
+    return *out >= VALID_FROM;
+}
+
 bool ext_rtc_init(i2c_master_bus_handle_t bus)
 {
     if (i2c_master_probe(bus, RTC_ADDR, 50) != ESP_OK) {
@@ -61,9 +75,15 @@ bool ext_rtc_init(i2c_master_bus_handle_t bus)
     uint8_t c1 = 0;
     if (!rd(REG_CTRL1, &c1, 1)) {
         ESP_LOGW(TAG, "PCF85063 not answering");
+        i2c_master_bus_rm_device(s_dev);
+        s_dev = NULL;
         return false;
     }
-    if (c1 & (CTRL1_STOP | CTRL1_12_24)) {          /* running, 24-hour mode; keep CAP_SEL etc. */
+    if (c1 & CTRL1_STOP) {
+        s_stale = true;                              /* e.g. a write interrupted mid-sequence */
+        ESP_LOGW(TAG, "PCF85063 was stopped: its time is stale until the next sync");
+    }
+    if (c1 & (CTRL1_STOP | CTRL1_12_24)) {           /* run, 24-hour mode; keep CAP_SEL etc. */
         uint8_t w[2] = {REG_CTRL1, (uint8_t)(c1 & ~(CTRL1_STOP | CTRL1_12_24))};
         wr(w, sizeof(w));
     }
@@ -76,97 +96,72 @@ bool ext_rtc_present(void)
     return s_dev != NULL;
 }
 
-bool ext_rtc_restore_system_time(void)
+bool ext_rtc_read(long long *utc_s)
 {
-    struct timeval now;
-    gettimeofday(&now, NULL);
-    if (now.tv_sec >= VALID_FROM) {
-        return false;            /* survived a reset in the RTC domain: finer than the RTC's 1 s */
-    }
     uint8_t r[7];
-    if (!rd(REG_SECONDS, r, sizeof(r))) {
-        return false;
-    }
-    if (r[0] & SECONDS_OS) {
-        ESP_LOGW(TAG, "RTC oscillator was stopped: time not valid until the next sync");
-        return false;
-    }
-    int sec = bcd2bin(r[0] & 0x7F), min = bcd2bin(r[1] & 0x7F), hour = bcd2bin(r[2] & 0x3F);
-    int day = bcd2bin(r[3] & 0x3F), mon = bcd2bin(r[5] & 0x1F), year = 2000 + bcd2bin(r[6]);
-    if (mon < 1 || mon > 12 || day < 1 || day > 31 || hour > 23 || min > 59 || sec > 59) {
-        ESP_LOGW(TAG, "RTC holds an invalid date");
-        return false;
-    }
-    long long t = days_from_civil(year, mon, day) * 86400LL + hour * 3600 + min * 60 + sec;
-    if (t < VALID_FROM) {
-        ESP_LOGW(TAG, "RTC time %04d-%02d-%02d is before 2024: not set", year, mon, day);
-        return false;
-    }
-    struct timeval tv = {.tv_sec = (time_t)t, .tv_usec = 0};
-    settimeofday(&tv, NULL);
-    ESP_LOGI(TAG, "system time set from RTC: %04d-%02d-%02d %02d:%02d:%02d UTC", year, mon, day, hour, min, sec);
-    return true;
+    return !s_stale && rd(REG_SECONDS, r, sizeof(r)) && regs_to_utc(r, utc_s);
 }
 
-static int64_t now_us(void)
+bool ext_rtc_read_edge(long long *utc_s, int64_t *mono_us)
 {
-    struct timeval tv;
-    gettimeofday(&tv, NULL);
-    return (int64_t)tv.tv_sec * 1000000 + tv.tv_usec;
+    uint8_t first[7], r[7];
+    if (s_stale || !rd(REG_SECONDS, first, sizeof(first))) {
+        return false;
+    }
+    int64_t t0 = esp_timer_get_time();
+    while (esp_timer_get_time() - t0 < 1200000) {
+        vTaskDelay(pdMS_TO_TICKS(2));
+        int64_t before = esp_timer_get_time();
+        if (!rd(REG_SECONDS, r, sizeof(r))) {
+            return false;
+        }
+        int64_t after = esp_timer_get_time();
+        if (r[0] != first[0]) {
+            /* The change happened between the previous read and this one (~2 ms apart). */
+            *mono_us = (before + after) / 2 - 1000;
+            return regs_to_utc(r, utc_s);
+        }
+    }
+    ESP_LOGW(TAG, "seconds register did not advance in 1.2 s");
+    return false;
 }
 
-static bool regs_to_epoch(const uint8_t r[7], long long *out)
+static bool release(uint8_t c1)
 {
-    if (r[0] & SECONDS_OS) {
-        return false;
+    const uint8_t go[2] = {REG_CTRL1, c1};
+    for (int i = 0; i < 3; i++) {
+        if (wr(go, sizeof(go))) {
+            return true;
+        }
     }
-    int sec = bcd2bin(r[0] & 0x7F), min = bcd2bin(r[1] & 0x7F), hour = bcd2bin(r[2] & 0x3F);
-    int day = bcd2bin(r[3] & 0x3F), mon = bcd2bin(r[5] & 0x1F), year = 2000 + bcd2bin(r[6]);
-    if (mon < 1 || mon > 12 || day < 1 || day > 31 || hour > 23 || min > 59 || sec > 59) {
-        return false;
-    }
-    *out = days_from_civil(year, mon, day) * 86400LL + hour * 3600 + min * 60 + sec;
-    return *out >= VALID_FROM;
+    return false;
 }
 
-/*
- * Writes the system time into the RTC aligned to the second. Setting STOP holds the prescaler in
- * reset; after STOP is released the first seconds increment comes 0.507813..0.507935 s later
- * (PCF85063A datasheet, 8.2.1.4). So the registers are loaded with second S while stopped and
- * STOP is released at S + 0.492 s: the RTC then ticks to S+1 when the system clock does.
- * Before v0.13.1 the fraction of a second was dropped, up to 1 s of error per sync.
- */
-void ext_rtc_save_system_time(void)
+bool ext_rtc_write_aligned(int64_t (*utc_now_us)(void))
 {
     if (!s_dev) {
-        return;
-    }
-    int64_t t = now_us();
-    if (t / 1000000 < VALID_FROM) {
-        return;
+        return false;
     }
     uint8_t c1 = 0;
     if (!rd(REG_CTRL1, &c1, 1)) {
-        ESP_LOGW(TAG, "RTC write failed (control)");
-        return;
+        return false;
     }
     c1 &= ~(CTRL1_STOP | CTRL1_12_24);
-    /* Second to load: the next one whose release point (+0.492 s) is at least 50 ms away. */
+    int64_t t = utc_now_us();
     long long s = t / 1000000;
-    if (t % 1000000 > 442000) {
+    if (t % 1000000 > 442000) {                      /* release point must be >= 50 ms ahead */
         s++;
     }
     const uint8_t stop[2] = {REG_CTRL1, (uint8_t)(c1 | CTRL1_STOP)};
     if (!wr(stop, sizeof(stop))) {
-        ESP_LOGW(TAG, "RTC write failed (stop)");
-        return;
+        return false;                                /* not stopped: old time keeps running */
     }
     struct tm u;
     time_t st = (time_t)s;
     gmtime_r(&st, &u);
-    uint8_t w[8] = {
+    const uint8_t w[8] = {
         REG_SECONDS,
-        bin2bcd(u.tm_sec),                              /* also clears the OS flag */
+        bin2bcd(u.tm_sec),                           /* also clears the OS flag */
         bin2bcd(u.tm_min),
         bin2bcd(u.tm_hour),
         bin2bcd(u.tm_mday),
@@ -174,97 +169,33 @@ void ext_rtc_save_system_time(void)
         bin2bcd(u.tm_mon + 1),
         bin2bcd(u.tm_year % 100),
     };
-    bool ok = wr(w, sizeof(w));
-    const int64_t release = s * 1000000 + 492130;
+    bool loaded = wr(w, sizeof(w));
+    const int64_t rel = s * 1000000 + 492130;
     int64_t left;
-    while ((left = release - now_us()) > 3000) {
+    while ((left = rel - utc_now_us()) > 3000) {
         vTaskDelay(pdMS_TO_TICKS(left / 1000 - 2 > 0 ? left / 1000 - 2 : 1));
     }
-    while (now_us() < release) {
+    while (utc_now_us() < rel) {
     }
-    const uint8_t go[2] = {REG_CTRL1, c1};
-    ok = wr(go, sizeof(go)) && ok;
-    if (ok) {
-        ESP_LOGI(TAG, "RTC set to %04d-%02d-%02d %02d:%02d:%02d UTC (second-aligned)", u.tm_year + 1900,
-                 u.tm_mon + 1, u.tm_mday, u.tm_hour, u.tm_min, u.tm_sec);
-    } else {
-        ESP_LOGW(TAG, "RTC write failed");
-    }
-    s_last_sync_us = now_us();
-}
-
-/*
- * Corrects the system clock from the RTC. The ESP32's own clock runs from its internal RC
- * oscillator while asleep (these boards have no 32 kHz crystal on the ESP32), which drifts by
- * tens to hundreds of ppm; the PCF85063 runs from a quartz crystal. The RTC has no sub-second
- * register, so its seconds register is polled until it changes: that moment is exactly second R
- * on the RTC. Takes up to 1 s; done once an hour.
- */
-bool ext_rtc_sync_system_time(void)
-{
-    if (!s_dev) {
+    if (!release(c1)) {
+        ESP_LOGE(TAG, "could not restart the RTC: it is stopped");
+        s_stale = true;
         return false;
     }
-    uint8_t first[7], r[7];
-    if (!rd(REG_SECONDS, first, sizeof(first))) {
+    if (!loaded) {
+        ESP_LOGE(TAG, "time registers not written: RTC keeps its old time");
         return false;
     }
-    long long rtc = 0;
-    if (!regs_to_epoch(first, &rtc)) {
-        ESP_LOGW(TAG, "RTC time not valid: no correction");
+    /* Verify: ~0.6 s after the release it must read S+1. */
+    vTaskDelay(pdMS_TO_TICKS(620));
+    long long check = 0;
+    s_stale = false;
+    if (!ext_rtc_read(&check) || check != s + 1) {
+        ESP_LOGE(TAG, "RTC check failed after write (read %lld, expected %lld)", check, s + 1);
+        s_stale = true;
         return false;
     }
-    int64_t t0 = now_us(), before = 0, after = 0;
-    bool ticked = false;
-    while (now_us() - t0 < 1200000) {
-        before = now_us();
-        if (!rd(REG_SECONDS, r, sizeof(r))) {
-            return false;
-        }
-        after = now_us();
-        if (r[0] != first[0]) {
-            ticked = true;
-            break;
-        }
-        vTaskDelay(pdMS_TO_TICKS(2));
-    }
-    if (!ticked || !regs_to_epoch(r, &rtc)) {
-        ESP_LOGW(TAG, "RTC seconds did not advance: no correction");
-        return false;
-    }
-    /* The tick happened between the previous read and this one; the poll interval bounds the error. */
-    int64_t sys_at_tick = (before + after) / 2 - 1000;          /* ~half the 2 ms poll interval */
-    int64_t err_us = sys_at_tick - (int64_t)rtc * 1000000;      /* + = system clock fast */
-    if (err_us > 120000000 || err_us < -120000000) {
-        ESP_LOGW(TAG, "system clock and RTC differ by %lld s: not corrected (RTC not set?)",
-                 (long long)(err_us / 1000000));
-        return false;
-    }
-    struct timeval tv;
-    int64_t fixed = now_us() - err_us;
-    tv.tv_sec = (time_t)(fixed / 1000000);
-    tv.tv_usec = (suseconds_t)(fixed % 1000000);
-    settimeofday(&tv, NULL);
-    double hours = s_last_sync_us ? (sys_at_tick - s_last_sync_us) / 3.6e9 : 0;
-    if (hours > 0.1) {
-        ESP_LOGI(TAG, "clock corrected by %+lld ms after %.1f h (%+.0f ppm)", (long long)(-err_us / 1000),
-                 hours, -err_us / (hours * 3.6e3));
-    } else {
-        ESP_LOGI(TAG, "clock corrected by %+lld ms", (long long)(-err_us / 1000));
-    }
-    s_last_sync_us = now_us();
+    ESP_LOGI(TAG, "RTC set to %04d-%02d-%02d %02d:%02d:%02d UTC, verified", u.tm_year + 1900, u.tm_mon + 1,
+             u.tm_mday, u.tm_hour, u.tm_min, u.tm_sec);
     return true;
-}
-
-void ext_rtc_sync_if_due(void)
-{
-    if (!s_dev) {
-        return;
-    }
-    if (s_last_sync_us && now_us() - s_last_sync_us < EXT_RTC_SYNC_PERIOD_S * 1000000LL) {
-        return;
-    }
-    if (!ext_rtc_sync_system_time() && !s_last_sync_us) {
-        s_last_sync_us = now_us();                       /* RTC unusable: retry after a period */
-    }
 }

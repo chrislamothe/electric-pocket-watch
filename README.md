@@ -223,8 +223,15 @@ tools/wifi.py       command-line Improv client, for debugging
   15 min, every 2 min below 3.5 V, with reset and power-off reasons at each boot).
 - **1.75 / 1.75-B**: PWR is not on a wake-capable pin, so the watch wakes once a second to read
   it; the PMIC latches presses in between, so a short tap still wakes it (within 1 s). BOOT wakes
-  at once. The system clock is corrected from the PCF85063 every hour (v0.13.1).
-- **1.75C**: no clock chip; the clock drifts ~10 s/day (ESP32 RC oscillator) until a Wi-Fi sync.
+  at once.
+- **Timekeeping** (`main/timesvc.c`, v0.14.0): one service owns the clock. The ESP32 keeps time in
+  sleep from an internal RC oscillator (up to ~100 ppm). On boards with the PCF85063 (1.75,
+  1.75-B, 2.06) the clock is checked against it on every wake and corrected on its seconds tick
+  hourly; network time is written to it second-aligned and verified; a saved network is synced
+  weekly. The 1.75C has no clock chip: its RC drift is measured between network syncs and
+  compensated, a saved network is synced daily, and after a power-off without a sync the faces
+  show "Time not set". Settings > System shows the source and the last correction. Not yet
+  measured on hardware.
 - Planned: hinged-lid opening animation, time-zone setting, alarm with chime.
 
 ## License

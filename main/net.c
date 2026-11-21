@@ -11,7 +11,8 @@
 #include "esp_log.h"
 #include "esp_netif.h"
 #include "esp_netif_sntp.h"
-#include "ext_rtc.h"
+#include "esp_timer.h"
+#include "timesvc.h"
 #include "esp_wifi.h"
 #include "settings.h"
 
@@ -207,22 +208,31 @@ static void radio_off(void)
     }
 }
 
+/* The time service's lock is held across the exchange: SNTP steps the system clock from its own
+ * callback, and nothing else may change the clock or touch the RTC meanwhile. */
 static bool sync_ntp(void)
 {
-    esp_sntp_config_t cfg = ESP_NETIF_SNTP_DEFAULT_CONFIG("pool.ntp.org");
-    if (esp_netif_sntp_init(&cfg) != ESP_OK) {
+    if (!timesvc_lock(3000)) {
+        ESP_LOGW(TAG, "time service busy: SNTP skipped");
         return false;
     }
+    esp_sntp_config_t cfg = ESP_NETIF_SNTP_DEFAULT_CONFIG("pool.ntp.org");
+    if (esp_netif_sntp_init(&cfg) != ESP_OK) {
+        timesvc_unlock();
+        return false;
+    }
+    const int64_t sys_before = timesvc_utc_us(), mono_before = esp_timer_get_time();
     bool ok = esp_netif_sntp_sync_wait(pdMS_TO_TICKS(NTP_TIMEOUT_MS)) == ESP_OK;
     esp_netif_sntp_deinit();
     if (ok) {
-        struct timeval tv;
-        gettimeofday(&tv, NULL);
-        ESP_LOGI(TAG, "SNTP sync ok, epoch %lld", (long long)tv.tv_sec);
-        ext_rtc_save_system_time();                         /* boards with a PCF85063 keep it over power-off */
+        /* Where the clock would be now without the step, minus where SNTP put it. */
+        int64_t err = sys_before + (esp_timer_get_time() - mono_before) - timesvc_utc_us();
+        ESP_LOGI(TAG, "SNTP sync ok, epoch %lld", (long long)(timesvc_utc_us() / 1000000));
+        timesvc_net_synced(err);                            /* also saves it to the RTC, verified */
     } else {
         ESP_LOGW(TAG, "SNTP sync timed out");
     }
+    timesvc_unlock();
     return ok;
 }
 

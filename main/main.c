@@ -32,13 +32,13 @@
 #include "settings_ui.h"
 #include "splash.h"
 #include "version.h"
-#include "watch_time.h"
+#include "timesvc.h"
 
 static const char *TAG = "pocketwatch";
 
 /* Try one sync shortly after boot (saved network, or an open one if allowed); the result shows
  * under Settings > Wi-Fi. Without an RTC chip (1.75C) this is what sets the clock after a
- * power-off; with one it corrects drift. */
+ * power-off; with one it corrects the RTC. Later syncs are scheduled by timesvc.c. */
 static void boot_sync_task(void *arg)
 {
     (void)arg;
@@ -70,9 +70,8 @@ void app_main(void)
     board_init(bus);
     parked_init(bus);                           /* accelerometer, audio: off for good */
     touch_init(bus);                            /* asleep except in the Settings menu */
-    if (ext_rtc_init(bus)) {
-        ext_rtc_restore_system_time();              /* before the first battery-log record */
-    }
+    ext_rtc_init(bus);
+    timesvc_init();                             /* clock source decided before the first log record */
     ESP_LOGI(TAG, "step: PMIC");
     if (!axp_init(bus)) {
         ESP_LOGE(TAG, "PMIC not available");
@@ -85,7 +84,6 @@ void app_main(void)
         battlog_sample("boot");
         controller_check_empty_at_boot();
     }
-    watch_time_init();
     buttons_init();
 
     ESP_LOGI(TAG, "step: faces");

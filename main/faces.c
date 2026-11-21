@@ -6,7 +6,7 @@
 #include "axp.h"
 #include "bsp/esp-bsp.h"
 #include "settings.h"
-#include "watch_time.h"
+#include "timesvc.h"
 
 static const char *TAG = "faces";
 
@@ -16,7 +16,9 @@ static const watch_face_t *const s_faces[] = {&face_roman, &face_arabic, &face_b
 static int s_index = 0;
 static lv_obj_t *s_root = NULL;
 static lv_timer_t *s_timer = NULL;
-static int s_last_sec = -1;
+static time_t s_last_utc = -1;
+static uint32_t s_last_gen;
+static lv_obj_t *s_unset;          /* "Time not set" while the clock has no source */
 
 /* ---------------------------------------------------------------- battery indicator
  * Twelve segments at the edge of the glass, one per hour: 12-1 is the first, 11-12 the last, so a
@@ -164,11 +166,30 @@ static void batt_create(void)
 static void tick(bool force)
 {
     struct tm now;
-    watch_time_now(&now, NULL);
-    if (!force && now.tm_sec == s_last_sec) {
-        return;
+    time_t utc = timesvc_utc();
+    uint32_t gen = timesvc_generation();
+    if (!force && utc == s_last_utc && gen == s_last_gen) {
+        return;                                 /* same second and the clock was not stepped */
     }
-    s_last_sec = now.tm_sec;
+    s_last_utc = utc;
+    s_last_gen = gen;
+    timesvc_now(&now, NULL);
+    bool unset = !timesvc_trusted();
+    if (unset && !s_unset) {
+        s_unset = lv_label_create(lv_layer_top());
+        lv_obj_set_style_text_font(s_unset, &lv_font_montserrat_20, 0);
+        lv_obj_set_style_text_color(s_unset, lv_color_hex(0xE0A040), 0);
+        lv_obj_set_style_bg_color(s_unset, lv_color_black(), 0);
+        lv_obj_set_style_bg_opa(s_unset, LV_OPA_80, 0);
+        lv_obj_set_style_radius(s_unset, 10, 0);
+        lv_obj_set_style_pad_hor(s_unset, 12, 0);
+        lv_obj_set_style_pad_ver(s_unset, 6, 0);
+        lv_label_set_text(s_unset, "Time not set - hold BOOT to sync");
+        lv_obj_align(s_unset, LV_ALIGN_TOP_MID, 0, 70);
+    } else if (!unset && s_unset) {
+        lv_obj_delete(s_unset);
+        s_unset = NULL;
+    }
     if (s_root) {
         s_faces[s_index]->update(&now);
     }
