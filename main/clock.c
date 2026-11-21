@@ -43,8 +43,8 @@ static SemaphoreHandle_t s_hw;                  /* RTC/network transactions and 
 static TaskHandle_t s_task;
 static bool s_rtc;                              /* PCF85063 present */
 static bool s_rtc_trusted;                      /* running, valid, and not contradicted */
-static rtc_status_t s_rtc_last = RTC_OK;        /* last RTC operation result */
-static rtc_status_t s_rtc_write = RTC_OK;       /* last RTC write result */
+static pcf_status_t s_rtc_last = PCF_OK;        /* last RTC operation result */
+static pcf_status_t s_rtc_write = PCF_OK;       /* last RTC write result */
 static bool s_rtc_written;                      /* a write was attempted since power-on */
 static int64_t s_ref_utc, s_ref_mono;           /* last precise reference (refine or network) */
 static bool s_ref_ok;
@@ -177,29 +177,29 @@ static void take_reference(int64_t utc, int64_t m, const char *what)
 
 /* ---------------------------------------------------------------- RTC */
 
-static void rtc_failed(rtc_status_t st, const char *during)
+static void rtc_failed(pcf_status_t st, const char *during)
 {
     s_rtc_last = st;
     s_rtc_failures++;
-    if (st == RTC_OSC_LOST || st == RTC_STOPPED || st == RTC_BAD_DATA || st == RTC_NO_TICK) {
+    if (st == PCF_OSC_LOST || st == PCF_STOPPED || st == PCF_BAD_DATA || st == PCF_NO_TICK) {
         s_rtc_trusted = false;                                    /* until a verified write */
     }
-    ESP_LOGW(TAG, "RTC %s: %s%s", during, rtc_status_text(st), s_rtc_trusted ? "" : " - not trusted until a sync");
+    ESP_LOGW(TAG, "RTC %s: %s%s", during, pcf_status_text(st), s_rtc_trusted ? "" : " - not trusted until a sync");
 }
 
 /* Precise anchor on the RTC rollover. s_hw held. */
 static void rtc_refine(void)
 {
     int64_t r = 0, m = 0, win = 0;
-    rtc_status_t st = rtc_read_edge(&r, &m, &win);
-    if (st != RTC_OK) {
+    pcf_status_t st = pcf_read_edge(&r, &m, &win);
+    if (st != PCF_OK) {
         rtc_failed(st, "refine");
         if (s_quality == CLOCK_READY && s_source == CLOCK_SRC_RTC) {
             set_quality(CLOCK_ESTIMATED);
         }
         return;
     }
-    s_rtc_last = RTC_OK;
+    s_rtc_last = PCF_OK;
     s_refines++;
     int64_t utc = r * 1000000;
     int64_t shift = utc - est_at(m);
@@ -276,7 +276,7 @@ void clock_init(i2c_master_bus_handle_t bus)
         s_ppm_ok = true;
         ESP_LOGI(TAG, "sleep-clock correction %+.1f ppm (measured earlier)", s_ppm);
     }
-    s_rtc = rtc_init(bus);
+    s_rtc = pcf_init(bus);
 
     struct timeval tv;
     gettimeofday(&tv, NULL);
@@ -285,9 +285,9 @@ void clock_init(i2c_master_bus_handle_t bus)
 
     if (s_rtc) {
         int64_t r = 0, m = 0, win = 0;
-        rtc_status_t st = rtc_read_edge(&r, &m, &win);
+        pcf_status_t st = pcf_read_edge(&r, &m, &win);
         s_rtc_last = st;
-        if (st == RTC_OK) {
+        if (st == PCF_OK) {
             s_rtc_trusted = true;
             s_ref_utc = r * 1000000;
             s_ref_mono = m;
@@ -295,7 +295,7 @@ void clock_init(i2c_master_bus_handle_t bus)
             publish(r * 1000000, m, CLOCK_READY, CLOCK_SRC_RTC);
             ESP_LOGI(TAG, "time from the RTC (rollover bracket %lld us)", (long long)win);
         } else {
-            ESP_LOGW(TAG, "RTC not usable at start-up: %s", rtc_status_text(st));
+            ESP_LOGW(TAG, "RTC not usable at start-up: %s", pcf_status_text(st));
         }
     }
     if (s_quality == CLOCK_UNSET && retained) {
@@ -323,8 +323,8 @@ void clock_display_wake(void)
         return;                                      /* a transaction is running; refine follows */
     }
     int64_t r = 0;
-    rtc_status_t st = rtc_read(&r);
-    if (st == RTC_OK) {
+    pcf_status_t st = pcf_read(&r);
+    if (st == PCF_OK) {
         int64_t m = mono(), est = est_at(m), lo = r * 1000000;
         if (est >= lo - 20000 && est < lo + 1020000) {
             set_quality(CLOCK_READY);                /* bridge agrees with the RTC second: keep its fraction */
@@ -429,7 +429,7 @@ bool clock_sntp_wait_apply(int timeout_ms)
     int64_t off = was_set ? est_at(m) - utc : 0;
     if (s_rtc && s_rtc_trusted) {
         int64_t r = 0;
-        if (rtc_read(&r) == RTC_OK) {
+        if (pcf_read(&r) == PCF_OK) {
             int64_t rtc_off = r * 1000000 + 500000 - (utc + (mono() - m));
             if (llabs(rtc_off) > 2000000) {
                 s_conflicts++;
@@ -455,10 +455,10 @@ bool clock_sntp_wait_apply(int timeout_ms)
     }
     if (s_rtc) {
         s_rtc_written = true;
-        s_rtc_write = rtc_write(now_est);
-        if (s_rtc_write == RTC_OK) {
+        s_rtc_write = pcf_write(now_est);
+        if (s_rtc_write == PCF_OK) {
             s_rtc_trusted = true;
-            s_rtc_last = RTC_OK;
+            s_rtc_last = PCF_OK;
         } else {
             rtc_failed(s_rtc_write, "write");
             s_rtc_trusted = false;
@@ -480,12 +480,12 @@ void clock_summary(char *buf, size_t len)
     }
     if (s_rtc && n > 0 && (size_t)n < len) {
         n += snprintf(buf + n, len - n, "\nRTC: %s%s", s_rtc_trusted ? "running" : "not trusted",
-                      s_rtc_last != RTC_OK ? " - " : "");
-        if (s_rtc_last != RTC_OK && n > 0 && (size_t)n < len) {
-            n += snprintf(buf + n, len - n, "%s", rtc_status_text(s_rtc_last));
+                      s_rtc_last != PCF_OK ? " - " : "");
+        if (s_rtc_last != PCF_OK && n > 0 && (size_t)n < len) {
+            n += snprintf(buf + n, len - n, "%s", pcf_status_text(s_rtc_last));
         }
-        if (s_rtc_written && s_rtc_write != RTC_OK && n > 0 && (size_t)n < len) {
-            n += snprintf(buf + n, len - n, "\nLast RTC write: %s", rtc_status_text(s_rtc_write));
+        if (s_rtc_written && s_rtc_write != PCF_OK && n > 0 && (size_t)n < len) {
+            n += snprintf(buf + n, len - n, "\nLast RTC write: %s", pcf_status_text(s_rtc_write));
         }
         if ((s_rtc_failures || s_conflicts) && n > 0 && (size_t)n < len) {
             n += snprintf(buf + n, len - n, "\nRTC failures %lu, conflicts %lu", (unsigned long)s_rtc_failures,

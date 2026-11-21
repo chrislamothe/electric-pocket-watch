@@ -20,17 +20,17 @@ static const char *TAG = "rtc";
 
 static i2c_master_dev_handle_t s_dev;
 
-const char *rtc_status_text(rtc_status_t s)
+const char *pcf_status_text(pcf_status_t s)
 {
     switch (s) {
-    case RTC_OK:       return "ok";
-    case RTC_ABSENT:   return "absent";
-    case RTC_BUS:      return "I2C error";
-    case RTC_STOPPED:  return "stopped";
-    case RTC_OSC_LOST: return "oscillator stopped (time lost)";
-    case RTC_BAD_DATA: return "invalid data";
-    case RTC_NO_TICK:  return "not advancing";
-    case RTC_VERIFY:   return "write not verified";
+    case PCF_OK:       return "ok";
+    case PCF_ABSENT:   return "absent";
+    case PCF_BUS:      return "I2C error";
+    case PCF_STOPPED:  return "stopped";
+    case PCF_OSC_LOST: return "oscillator stopped (time lost)";
+    case PCF_BAD_DATA: return "invalid data";
+    case PCF_NO_TICK:  return "not advancing";
+    case PCF_VERIFY:   return "write not verified";
     }
     return "?";
 }
@@ -68,32 +68,32 @@ static bool wr(const uint8_t *buf, size_t n)
     return s_dev && i2c_master_transmit(s_dev, buf, n, XFER_MS) == ESP_OK;
 }
 
-static rtc_status_t decode(const uint8_t r[7], int64_t *utc_s)
+static pcf_status_t decode(const uint8_t r[7], int64_t *utc_s)
 {
     if (r[0] & SECONDS_OS) {
-        return RTC_OSC_LOST;
+        return PCF_OSC_LOST;
     }
     int sec, min, hour, day, mon, yy;
     if (!bcd(r[0], 0x7F, &sec) || !bcd(r[1], 0x7F, &min) || !bcd(r[2], 0x3F, &hour) ||
         !bcd(r[3], 0x3F, &day) || !bcd(r[5], 0x1F, &mon) || !bcd(r[6], 0xFF, &yy)) {
-        return RTC_BAD_DATA;
+        return PCF_BAD_DATA;
     }
     static const uint8_t mdays[12] = {31, 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31};
     int year = 2000 + yy;
     bool leap = (year % 4 == 0 && year % 100 != 0) || year % 400 == 0;
     if (mon < 1 || mon > 12 || day < 1 || day > mdays[mon - 1] + (mon == 2 && leap) || hour > 23 ||
         min > 59 || sec > 59) {
-        return RTC_BAD_DATA;
+        return PCF_BAD_DATA;
     }
     int64_t t = days_from_civil(year, mon, day) * 86400 + hour * 3600 + min * 60 + sec;
     if (t < MIN_UTC || t > MAX_UTC) {
-        return RTC_BAD_DATA;
+        return PCF_BAD_DATA;
     }
     *utc_s = t;
-    return RTC_OK;
+    return PCF_OK;
 }
 
-bool rtc_init(i2c_master_bus_handle_t bus)
+bool pcf_init(i2c_master_bus_handle_t bus)
 {
     if (i2c_master_probe(bus, RTC_ADDR, XFER_MS) != ESP_OK) {
         ESP_LOGI(TAG, "no PCF85063 on this board");
@@ -123,52 +123,52 @@ bool rtc_init(i2c_master_bus_handle_t bus)
     return true;
 }
 
-bool rtc_present(void)
+bool pcf_present(void)
 {
     return s_dev != NULL;
 }
 
-static rtc_status_t ctrl_running(void)
+static pcf_status_t ctrl_running(void)
 {
     uint8_t c1 = 0;
     if (!rd(REG_CTRL1, &c1, 1)) {
-        return RTC_BUS;
+        return PCF_BUS;
     }
-    return (c1 & CTRL1_STOP) ? RTC_STOPPED : RTC_OK;
+    return (c1 & CTRL1_STOP) ? PCF_STOPPED : PCF_OK;
 }
 
-rtc_status_t rtc_read(int64_t *utc_s)
+pcf_status_t pcf_read(int64_t *utc_s)
 {
     if (!s_dev) {
-        return RTC_ABSENT;
+        return PCF_ABSENT;
     }
-    rtc_status_t st = ctrl_running();
-    if (st != RTC_OK) {
+    pcf_status_t st = ctrl_running();
+    if (st != PCF_OK) {
         return st;
     }
     uint8_t r[7];
     if (!rd(REG_SECONDS, r, sizeof(r))) {
-        return RTC_BUS;
+        return PCF_BUS;
     }
     return decode(r, utc_s);
 }
 
-rtc_status_t rtc_read_edge(int64_t *utc_s, int64_t *mono_us, int64_t *window_us)
+pcf_status_t pcf_read_edge(int64_t *utc_s, int64_t *mono_us, int64_t *window_us)
 {
     if (!s_dev) {
-        return RTC_ABSENT;
+        return PCF_ABSENT;
     }
-    rtc_status_t st = ctrl_running();
-    if (st != RTC_OK) {
+    pcf_status_t st = ctrl_running();
+    if (st != PCF_OK) {
         return st;
     }
     uint8_t first[7], r[7];
     int64_t prev_start = esp_timer_get_time();
     if (!rd(REG_SECONDS, first, sizeof(first))) {
-        return RTC_BUS;
+        return PCF_BUS;
     }
     int64_t t_first = 0;
-    if ((st = decode(first, &t_first)) != RTC_OK) {
+    if ((st = decode(first, &t_first)) != PCF_OK) {
         return st;
     }
     const int64_t deadline = prev_start + 1300000;
@@ -176,36 +176,36 @@ rtc_status_t rtc_read_edge(int64_t *utc_s, int64_t *mono_us, int64_t *window_us)
         vTaskDelay(1);
         int64_t start = esp_timer_get_time();
         if (!rd(REG_SECONDS, r, sizeof(r))) {
-            return RTC_BUS;
+            return PCF_BUS;
         }
         int64_t end = esp_timer_get_time();
         if (r[0] != first[0]) {
             int64_t t = 0;
-            if ((st = decode(r, &t)) != RTC_OK) {
+            if ((st = decode(r, &t)) != PCF_OK) {
                 return st;
             }
             if (t != t_first + 1) {
-                return RTC_BAD_DATA;                 /* skipped or jumped: not a clean rollover */
+                return PCF_BAD_DATA;                 /* skipped or jumped: not a clean rollover */
             }
             /* The rollover lies between the start of the last old read and the end of this one. */
             *utc_s = t;
             *mono_us = (prev_start + end) / 2;
             *window_us = end - prev_start;
-            return RTC_OK;
+            return PCF_OK;
         }
         prev_start = start;
     }
-    return RTC_NO_TICK;
+    return PCF_NO_TICK;
 }
 
-rtc_status_t rtc_write(int64_t (*now_us)(void))
+pcf_status_t pcf_write(int64_t (*now_us)(void))
 {
     if (!s_dev) {
-        return RTC_ABSENT;
+        return PCF_ABSENT;
     }
     uint8_t c1 = 0;
     if (!rd(REG_CTRL1, &c1, 1)) {
-        return RTC_BUS;
+        return PCF_BUS;
     }
     c1 &= ~(CTRL1_STOP | CTRL1_12_24);
     int64_t t = now_us();
@@ -214,11 +214,11 @@ rtc_status_t rtc_write(int64_t (*now_us)(void))
         s++;
     }
     if (s < MIN_UTC || s > MAX_UTC) {
-        return RTC_BAD_DATA;
+        return PCF_BAD_DATA;
     }
     const uint8_t stop[2] = {REG_CTRL1, (uint8_t)(c1 | CTRL1_STOP)};
     if (!wr(stop, sizeof(stop))) {
-        return RTC_BUS;                              /* never stopped: nothing to undo */
+        return PCF_BUS;                              /* never stopped: nothing to undo */
     }
     struct tm u;
     time_t st = (time_t)s;
@@ -239,26 +239,26 @@ rtc_status_t rtc_write(int64_t (*now_us)(void))
     const uint8_t go[2] = {REG_CTRL1, c1};
     bool running = false;
     for (int i = 0; i < 3 && !running; i++) {
-        running = wr(go, sizeof(go)) && ctrl_running() == RTC_OK;
+        running = wr(go, sizeof(go)) && ctrl_running() == PCF_OK;
     }
     if (!running) {
         ESP_LOGE(TAG, "RTC could not be restarted");
-        return RTC_STOPPED;
+        return PCF_STOPPED;
     }
     if (!loaded) {
-        return RTC_BUS;
+        return PCF_BUS;
     }
     int64_t r = 0, m = 0, win = 0;
-    rtc_status_t v = rtc_read_edge(&r, &m, &win);
-    if (v != RTC_OK) {
+    pcf_status_t v = pcf_read_edge(&r, &m, &win);
+    if (v != PCF_OK) {
         return v;
     }
     int64_t expect = (now_us() - (esp_timer_get_time() - m) + 500000) / 1000000;
     if (r != expect) {
         ESP_LOGE(TAG, "RTC read back %lld, expected %lld", (long long)r, (long long)expect);
-        return RTC_VERIFY;
+        return PCF_VERIFY;
     }
     ESP_LOGI(TAG, "RTC set to %04d-%02d-%02d %02d:%02d:%02d UTC, running and verified", u.tm_year + 1900,
              u.tm_mon + 1, u.tm_mday, u.tm_hour, u.tm_min, u.tm_sec);
-    return RTC_OK;
+    return PCF_OK;
 }
