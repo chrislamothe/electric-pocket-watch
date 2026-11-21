@@ -85,10 +85,44 @@ jobs:
           path: firmware-stable.bin
           if-no-files-found: error
 
+  lab:
+    # Clock lab firmware (main/clocklab.c): timekeeping experiments, two slow-clock variants.
+    runs-on: ubuntu-latest
+    container: espressif/idf:v5.5.5
+    strategy:
+      fail-fast: false
+      matrix:
+        board: [175c, 175, 206]
+        variant: [fast, slow]
+    steps:
+      - uses: actions/checkout@v7
+      - name: Build clock lab (${{ matrix.board }}, ${{ matrix.variant }})
+        shell: bash
+        env:
+          BOARD: ${{ matrix.board }}
+          VARIANT: ${{ matrix.variant }}
+        run: |
+          set -e
+          git config --global --add safe.directory "*"
+          . "$IDF_PATH/export.sh"
+          D="sdkconfig.defaults;sdkconfig.lab"
+          if [ "$VARIANT" = slow ]; then D="$D;sdkconfig.lab_rcslow"; fi
+          B=build-lab-$BOARD-$VARIANT
+          idf.py -B $B -D BOARD=$BOARD -D SDKCONFIG=$B/sdkconfig -D SDKCONFIG_DEFAULTS="$D" set-target esp32s3
+          idf.py -B $B -D BOARD=$BOARD -D SDKCONFIG=$B/sdkconfig -D SDKCONFIG_DEFAULTS="$D" build
+          grep -E "^CONFIG_(WATCH_CLOCK_LAB|RTC_CLK_SRC_INT_8MD256|RTC_CLK_SRC_INT_RC)=" $B/sdkconfig
+          idf.py -B $B -D SDKCONFIG=$B/sdkconfig merge-bin -o merged-lab.bin
+          cp -f "$(find . -name merged-lab.bin | head -1)" firmware-lab-$BOARD-$VARIANT.bin
+      - uses: actions/upload-artifact@v7
+        with:
+          name: firmware-lab-${{ matrix.board }}-${{ matrix.variant }}
+          path: firmware-lab-${{ matrix.board }}-${{ matrix.variant }}.bin
+          if-no-files-found: error
+
   pages:
     # Publishes the browser installer (ESP Web Tools): one install button and manifest per board.
     if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main'
-    needs: [build, stable]
+    needs: [build, stable, lab]
     continue-on-error: true
     runs-on: ubuntu-latest
     permissions:
@@ -118,6 +152,12 @@ jobs:
           for B in 175c 175 206; do
             cp fw/firmware-$B.bin _site/firmware-$B.bin
             sed -e "s/__VERSION__/$VER (build $SHA)/g" -e "s/__FIRMWARE__/firmware-$B.bin?v=$SHA/g" site/manifest.json > _site/manifest-$B.json
+          done
+          for B in 175c 175 206; do
+            for V in fast slow; do
+              cp fw/firmware-lab-$B-$V.bin _site/
+              sed -e "s/__VERSION__/clock lab $VER $V (build $SHA)/g" -e "s/__FIRMWARE__/firmware-lab-$B-$V.bin?v=$SHA/g" site/manifest.json > _site/manifest-lab-$B-$V.json
+            done
           done
           # Stable = last build confirmed on hardware. Older links (manifest.json / firmware.bin) get it too.
           read SREF SVER SBOARD < site/stable.txt
