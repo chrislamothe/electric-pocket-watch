@@ -409,6 +409,18 @@ void clock_sntp_arm(void)
     xSemaphoreTake(s_sntp_sem, 0);                   /* drop a stale measurement */
 }
 
+bool clock_sntp_wait_sample(int timeout_ms, int64_t *utc_us, int64_t *mono_us)
+{
+    if (!s_sntp_sem || xSemaphoreTake(s_sntp_sem, pdMS_TO_TICKS(timeout_ms)) != pdTRUE) {
+        return false;
+    }
+    taskENTER_CRITICAL(&s_sntp_mux);
+    *utc_us = (int64_t)s_sntp_tv.tv_sec * 1000000 + s_sntp_tv.tv_usec;
+    *mono_us = s_sntp_mono;
+    taskEXIT_CRITICAL(&s_sntp_mux);
+    return *utc_us / 1000000 >= MIN_UTC_S;
+}
+
 bool clock_sntp_wait_apply(int timeout_ms)
 {
     if (!s_sntp_sem || xSemaphoreTake(s_sntp_sem, pdMS_TO_TICKS(timeout_ms)) != pdTRUE) {

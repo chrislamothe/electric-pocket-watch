@@ -32,6 +32,7 @@
 #include "splash.h"
 #include "version.h"
 #include "clock.h"
+#include "clocklab.h"
 
 static const char *TAG = "pocketwatch";
 
@@ -56,6 +57,9 @@ void app_main(void)
     settings_ui_init();
 
     ESP_ERROR_CHECK(bsp_i2c_init());
+#if CONFIG_WATCH_CLOCK_LAB
+    clocklab_run(bsp_i2c_get_handle());         /* lab firmware: never returns, no display */
+#endif
     ESP_LOGI(TAG, "step: display start");
     lv_display_t *disp = display_start();
     if (!disp) {

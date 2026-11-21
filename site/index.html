@@ -80,6 +80,44 @@
   </div>
 
   <div class="card">
+    <h2>Clock lab (diagnostic, not a watch)</h2>
+    <p class="dim warn">Replaces the watch firmware with a timekeeping test. The screen stays dark. Reinstall a watch build afterwards.</p>
+    <p class="dim">Install, save Wi-Fi from this page, unplug, and leave the watch alone for about 14 hours (3 cycles of 6 experiments, each checked against network time). Then plug it in: it prints its results over USB every 20 seconds (Logs &amp; Console). Variant A is the watch's current sleep clock, B the other internal one. Hold BOOT 5 s while on USB to erase results and start again.</p>
+    <div class="boards">
+        <esp-web-install-button data-manifest="manifest-lab-175c-fast.json">
+          <button slot="activate">1.75C lab A: RC_FAST/256</button>
+          <span slot="unsupported" class="warn">Use Chrome or Edge on a computer.</span>
+          <span slot="not-allowed" class="warn">This page must be opened over https.</span>
+        </esp-web-install-button>
+        <esp-web-install-button data-manifest="manifest-lab-175c-slow.json">
+          <button slot="activate">1.75C lab B: RC_SLOW</button>
+          <span slot="unsupported" class="warn">Use Chrome or Edge on a computer.</span>
+          <span slot="not-allowed" class="warn">This page must be opened over https.</span>
+        </esp-web-install-button>
+        <esp-web-install-button data-manifest="manifest-lab-175-fast.json">
+          <button slot="activate">1.75 / 1.75-B lab A: RC_FAST/256</button>
+          <span slot="unsupported" class="warn">Use Chrome or Edge on a computer.</span>
+          <span slot="not-allowed" class="warn">This page must be opened over https.</span>
+        </esp-web-install-button>
+        <esp-web-install-button data-manifest="manifest-lab-175-slow.json">
+          <button slot="activate">1.75 / 1.75-B lab B: RC_SLOW</button>
+          <span slot="unsupported" class="warn">Use Chrome or Edge on a computer.</span>
+          <span slot="not-allowed" class="warn">This page must be opened over https.</span>
+        </esp-web-install-button>
+        <esp-web-install-button data-manifest="manifest-lab-206-fast.json">
+          <button slot="activate">2.06 lab A: RC_FAST/256</button>
+          <span slot="unsupported" class="warn">Use Chrome or Edge on a computer.</span>
+          <span slot="not-allowed" class="warn">This page must be opened over https.</span>
+        </esp-web-install-button>
+        <esp-web-install-button data-manifest="manifest-lab-206-slow.json">
+          <button slot="activate">2.06 lab B: RC_SLOW</button>
+          <span slot="unsupported" class="warn">Use Chrome or Edge on a computer.</span>
+          <span slot="not-allowed" class="warn">This page must be opened over https.</span>
+        </esp-web-install-button>
+    </div>
+  </div>
+
+  <div class="card">
     <h2>First install</h2>
     <ol>
       <li>Click your board's button and choose <b>Install Electric Pocket Watch</b>.</li>

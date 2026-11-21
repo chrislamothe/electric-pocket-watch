@@ -17,4 +17,12 @@ menu "Electric Pocket Watch"
           running and polls the wake pins, so the USB serial log stays up for development.
           On: always use real light sleep (the USB serial port is expected to drop while asleep).
 
+    config WATCH_CLOCK_LAB
+        bool "Clock lab firmware (timekeeping experiments, no watch UI)"
+        default n
+        help
+            Builds the clock-lab firmware instead of the watch: it runs light-sleep timing
+            experiments against network time (and the PCF85063 where fitted) and prints the
+            results over USB. See main/clocklab.c.
+
 endmenu

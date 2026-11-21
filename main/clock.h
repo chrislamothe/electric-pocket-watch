@@ -61,5 +61,7 @@ uint64_t clock_us_until_due(void);      /* next clock work: bound for the sleep 
  * (and saved to the RTC) before returning. */
 void clock_sntp_arm(void);
 bool clock_sntp_wait_apply(int timeout_ms);
+/* Measurement only (clock lab): the SNTP time and the esp_timer instant it was received. */
+bool clock_sntp_wait_sample(int timeout_ms, int64_t *utc_us, int64_t *mono_us);
 
 void clock_summary(char *buf, size_t len);

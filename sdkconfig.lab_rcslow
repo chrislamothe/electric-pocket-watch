@@ -1,0 +1,3 @@
+# Clock lab variant: RC_SLOW (136 kHz) as the RTC slow clock instead of RC_FAST/256
+# CONFIG_RTC_CLK_SRC_INT_8MD256 is not set
+CONFIG_RTC_CLK_SRC_INT_RC=y

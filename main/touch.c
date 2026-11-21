@@ -210,3 +210,24 @@ uint32_t touch_sleep_failures(void)
 {
     return s_sleep_failures;
 }
+
+void touch_sleep_only(i2c_master_bus_handle_t bus)
+{
+    const gpio_num_t rst = (gpio_num_t)BOARD_PIN_TOUCH_RST;
+    gpio_hold_dis(rst);
+    gpio_config_t cfg = {
+        .pin_bit_mask = BIT64(rst),
+        .mode = GPIO_MODE_OUTPUT,
+    };
+    gpio_config(&cfg);
+    gpio_sleep_sel_dis(rst);
+    i2c_device_config_t dc = {
+        .dev_addr_length = I2C_ADDR_BIT_LEN_7,
+        .device_address = BOARD_TOUCH_ADDR,
+        .scl_speed_hz = 400000,
+    };
+    if (!s_dev && i2c_master_bus_add_device(bus, &dc, &s_dev) != ESP_OK) {
+        return;
+    }
+    ESP_LOGI(TAG, "touch controller %s", put_to_sleep() ? "asleep" : "did not take the sleep command");
+}

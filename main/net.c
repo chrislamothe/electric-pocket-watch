@@ -211,6 +211,9 @@ static void radio_off(void)
  * never sets the system clock itself: the measurement is handed over and applied there (and saved
  * to the RTC, verified, on boards that have one). esp_netif_sntp_sync_wait() is not used: its
  * completion signal comes from the default hook that is replaced. */
+static bool s_measure_only;
+static int64_t s_meas_utc, s_meas_mono;
+
 static bool sync_ntp(void)
 {
     clock_sntp_arm();
@@ -218,7 +221,8 @@ static bool sync_ntp(void)
     if (esp_netif_sntp_init(&cfg) != ESP_OK) {
         return false;
     }
-    bool ok = clock_sntp_wait_apply(NTP_TIMEOUT_MS);
+    bool ok = s_measure_only ? clock_sntp_wait_sample(NTP_TIMEOUT_MS, &s_meas_utc, &s_meas_mono)
+                             : clock_sntp_wait_apply(NTP_TIMEOUT_MS);
     esp_netif_sntp_deinit();
     if (ok) {
         ESP_LOGI(TAG, "SNTP sync ok");
@@ -321,6 +325,19 @@ net_result_t net_sync_time(void)
     ESP_LOGI(TAG, "time sync result: %s", net_result_text(r));
     xSemaphoreGive(s_lock);
     return r;
+}
+
+bool net_measure_time(int64_t *utc_us, int64_t *mono_us)
+{
+    s_measure_only = true;
+    net_result_t r = net_sync_time();
+    s_measure_only = false;
+    if (r != NET_OK && r != NET_OK_OPEN) {
+        return false;
+    }
+    *utc_us = s_meas_utc;
+    *mono_us = s_meas_mono;
+    return true;
 }
 
 net_result_t net_provision(const char *ssid, const char *pass)

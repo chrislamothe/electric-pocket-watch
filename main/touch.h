@@ -28,3 +28,6 @@ void touch_wait_settled(int max_ms);
 
 /* Times the sleep command failed after 3 attempts (shown on Settings > System). */
 uint32_t touch_sleep_failures(void);
+
+/* Puts the controller to sleep without LVGL or the touch task (clock lab firmware). */
+void touch_sleep_only(i2c_master_bus_handle_t bus);
