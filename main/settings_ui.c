@@ -26,7 +26,7 @@
  */
 #include "settings_ui.h"
 #include "touch.h"
-#include "timesvc.h"
+#include "clock.h"
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -585,7 +585,7 @@ static void build_system(void)
     }
     if (o < (int)sizeof(buf) - 2) {
         buf[o++] = '\n';
-        timesvc_summary(buf + o, sizeof(buf) - o);
+        clock_summary(buf + o, sizeof(buf) - o);
     }
     lv_obj_t *info = label(s_list, buf, &lv_font_montserrat_16, COL_TEXT);
     lv_obj_set_width(info, lv_pct(100));

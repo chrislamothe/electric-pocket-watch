@@ -1,4 +1,4 @@
-idf_component_register(SRCS "main.c" "i2c_dev.c" "axp.c" "parked.c" "touch.c" "display.c" "buttons.c" "timesvc.c"
+idf_component_register(SRCS "main.c" "i2c_dev.c" "axp.c" "parked.c" "touch.c" "display.c" "buttons.c" "clock.c" "clock_rtc.c"
                             "faces.c" "face_analog.c" "face_calendar.c" "face_railroad.c"
                             "fonts/font_railroad_64.c" "fonts/font_railroad_20.c" "controller.c" "settings.c" "net.c" "improv.c" "settings_ui.c" "splash.c" "battlog.c" "display_dma.c" "lowpower.c" "ext_rtc.c"
                        INCLUDE_DIRS "."

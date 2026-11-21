@@ -27,18 +27,17 @@
 #include "touch.h"
 #include "improv.h"
 #include "net.h"
-#include "ext_rtc.h"
 #include "settings.h"
 #include "settings_ui.h"
 #include "splash.h"
 #include "version.h"
-#include "timesvc.h"
+#include "clock.h"
 
 static const char *TAG = "pocketwatch";
 
 /* Try one sync shortly after boot (saved network, or an open one if allowed); the result shows
  * under Settings > Wi-Fi. Without an RTC chip (1.75C) this is what sets the clock after a
- * power-off; with one it corrects the RTC. Later syncs are scheduled by timesvc.c. */
+ * power-off; with one it corrects the RTC. Later syncs are scheduled by clock.c. */
 static void boot_sync_task(void *arg)
 {
     (void)arg;
@@ -70,8 +69,7 @@ void app_main(void)
     board_init(bus);
     parked_init(bus);                           /* accelerometer, audio: off for good */
     touch_init(bus);                            /* asleep except in the Settings menu */
-    ext_rtc_init(bus);
-    timesvc_init();                             /* clock source decided before the first log record */
+    clock_init(bus);                            /* time source decided before the first log record */
     ESP_LOGI(TAG, "step: PMIC");
     if (!axp_init(bus)) {
         ESP_LOGE(TAG, "PMIC not available");

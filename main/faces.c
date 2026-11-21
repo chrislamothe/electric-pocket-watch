@@ -6,7 +6,7 @@
 #include "axp.h"
 #include "bsp/esp-bsp.h"
 #include "settings.h"
-#include "timesvc.h"
+#include "clock.h"
 
 static const char *TAG = "faces";
 
@@ -166,15 +166,16 @@ static void batt_create(void)
 static void tick(bool force)
 {
     struct tm now;
-    time_t utc = timesvc_utc();
-    uint32_t gen = timesvc_generation();
+    int64_t utc_us = 0;
+    clock_utc_us(&utc_us);
+    time_t utc = (time_t)(utc_us / 1000000);
+    uint32_t gen = clock_generation();
     if (!force && utc == s_last_utc && gen == s_last_gen) {
         return;                                 /* same second and the clock was not stepped */
     }
     s_last_utc = utc;
     s_last_gen = gen;
-    timesvc_now(&now, NULL);
-    bool unset = !timesvc_trusted();
+    bool unset = !clock_local(&now);
     if (unset && !s_unset) {
         s_unset = lv_label_create(lv_layer_top());
         lv_obj_set_style_text_font(s_unset, &lv_font_montserrat_20, 0);

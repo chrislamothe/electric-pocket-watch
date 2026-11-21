@@ -18,7 +18,7 @@
 #include "settings.h"
 #include "settings_ui.h"
 #include "touch.h"
-#include "timesvc.h"
+#include "clock.h"
 #include "splash.h"
 #include "lowpower.h"
 
@@ -138,7 +138,7 @@ static void screen_on(const char *why)
         esp_lv_adapter_resume();                     /* restart the LVGL worker and its tick */
         s_lvgl_paused = false;
     }
-    timesvc_on_wake();                               /* RTC check before any time is drawn */
+    clock_display_wake();                            /* anchor to the RTC before any time is drawn */
     faces_set_active(true);                          /* draws the current time first */
     lowpower_screen_show();                          /* full frame in panel memory, then DISPON */
     s_bright = settings_get_int("bright", CONFIG_WATCH_BRIGHTNESS);
@@ -297,9 +297,6 @@ static void run_screen_on(void)
                 idle = lv_display_get_inactive_time(NULL);
                 bsp_display_unlock();
             }
-            if (timesvc_us_until_due() == 0) {
-                timesvc_service();                   /* screen kept on (charging, always on) */
-            }
             if (battlog_due()) {
                 battlog_sample("awake");             /* keeps logging with the screen always on */
                 if (s_awake_ms == 0) {
@@ -423,6 +420,9 @@ static wake_src_t wait_for_wake(void)
     if (net_busy()) {
         light = false;                               /* Wi-Fi is in use: idle instead of sleeping */
     }
+    if (light && !clock_sleep_prepare()) {
+        light = false;                               /* RTC or network time transaction running */
+    }
     if (light) {
         if (!s_ignore_boot) {
             gpio_wakeup_enable(PIN_BOOT, GPIO_INTR_LOW_LEVEL);
@@ -434,7 +434,7 @@ static wake_src_t wait_for_wake(void)
 #endif
         esp_sleep_enable_gpio_wakeup();
         uint64_t wake_us = battlog_us_until_due();              /* battery log sample */
-        uint64_t time_us = timesvc_us_until_due();              /* clock maintenance */
+        uint64_t time_us = clock_us_until_due();                /* clock work (RTC refine, auto sync) */
         if (time_us < wake_us) {
             wake_us = time_us < 1000 ? 1000 : time_us;
         }
@@ -450,6 +450,7 @@ static wake_src_t wait_for_wake(void)
         esp_sleep_enable_timer_wakeup(wake_us);
         lowpower_sleep_begin();
         esp_err_t r = esp_light_sleep_start();
+        clock_sleep_resume(r == ESP_OK);             /* sleep-clock error removed from the bridge */
         lowpower_sleep_end(r == ESP_OK);
         gpio_wakeup_disable(PIN_BOOT);
 #if BOARD_PIN_PWR >= 0
@@ -473,9 +474,6 @@ static wake_src_t wait_for_wake(void)
     if (w == WAKE_NONE && battlog_due()) {
         battlog_sample(light ? "sleep" : "idle");
         check_empty(axp_rest_mv());
-    }
-    if (w == WAKE_NONE) {
-        timesvc_service();                           /* RTC correction, drift, automatic sync */
     }
     return w;
 }

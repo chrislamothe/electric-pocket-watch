@@ -224,14 +224,16 @@ tools/wifi.py       command-line Improv client, for debugging
 - **1.75 / 1.75-B**: PWR is not on a wake-capable pin, so the watch wakes once a second to read
   it; the PMIC latches presses in between, so a short tap still wakes it (within 1 s). BOOT wakes
   at once.
-- **Timekeeping** (`main/timesvc.c`, v0.14.0): one service owns the clock. The ESP32 keeps time in
-  sleep from an internal RC oscillator (up to ~100 ppm). On boards with the PCF85063 (1.75,
-  1.75-B, 2.06) the clock is checked against it on every wake and corrected on its seconds tick
-  hourly; network time is written to it second-aligned and verified; a saved network is synced
-  weekly. The 1.75C has no clock chip: its RC drift is measured between network syncs and
-  compensated, a saved network is synced daily, and after a power-off without a sync the faces
-  show "Time not set". Settings > System shows the source and the last correction. Not yet
-  measured on hardware.
+- **Timekeeping** (`main/clock.c`, `main/clock_rtc.c`, v0.15.0, rebuilt from scratch): the time is
+  an anchor (a UTC instant measured at an `esp_timer` instant) plus elapsed `esp_timer` time. Awake
+  that is crystal-timed; across light sleep ESP-IDF bridges it with the internal RC oscillator,
+  which is not trusted. Anchors come only from measurements: the PCF85063 (read before every
+  screen wake is drawn, then refined on its seconds rollover, and at least hourly) or the network
+  (SNTP's time hook is overridden, so SNTP hands over a measurement instead of setting the clock;
+  the RTC is written from it and verified). Every reference also measures the sleep clock's error,
+  which is stored and removed after each sleep - the 1.75C, without an RTC, relies on that and on a
+  daily automatic sync with a saved network. Before any measurement the faces say "Time not set".
+  Settings > System shows the source, RTC state, and the measured sleep-clock error.
 - Planned: hinged-lid opening animation, time-zone setting, alarm with chime.
 
 ## License
