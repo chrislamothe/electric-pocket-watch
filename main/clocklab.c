@@ -35,6 +35,8 @@
  *
  * Results go to NVS (namespace "clocklab"), survive resets, and are printed over USB every 20 s
  * whenever USB power is present (experiments pause on USB: the watch does not light-sleep there).
+ * When the run is complete (or the battery is low) the watch powers itself off: press PWR with
+ * USB connected to read the results (USB cannot enumerate while the chip is in light sleep).
  * Hold BOOT for 5 s while on USB to erase the results and start a new run.
  *
  * Slow-clock source is a build option (CONFIG_RTC_CLK_SRC_*): the variant is part of every record.
@@ -42,8 +44,8 @@
 
 static const char *TAG = "clocklab";
 
-#define LAB_FORMAT      1
-#define CYCLES          3
+#define LAB_FORMAT      2
+#define CYCLES          2
 #define REF_TRIES       3
 #define LOW_MV          3500
 #define PIN_BOOT        GPIO_NUM_0
@@ -66,13 +68,15 @@ typedef struct {
     uint32_t awake_s;
 } block_t;
 
+/* Format 2: format 1 showed no per-sleep error (0.2 s to 60 s sleeps all ~-7500 ppm) and a rate
+ * that eases with sleep length (15 min ~-6700, 30 min ~-5200 ppm). This run maps long sleeps. */
 static const block_t BLOCKS[] = {
     {"AWAKE", 0, 0, 1800},              /* 30 min CPU awake, no sleep */
-    {"LONG", 2, 1800000, 0},            /* 2 x 30 min */
-    {"MIN", 60, 60000, 0},              /* 60 x 1 min */
     {"SEC", 1800, 1000, 0},             /* 1800 x 1 s */
-    {"FIFTH", 3000, 200, 0},            /* 3000 x 0.2 s */
     {"PROD", 4, 900000, 0},             /* 4 x 15 min (the watch's screen-off pattern) */
+    {"LONG", 2, 1800000, 0},            /* 2 x 30 min */
+    {"HOUR", 1, 3600000, 0},            /* 1 x 1 h */
+    {"3HOUR", 1, 10800000, 0},          /* 1 x 3 h */
 };
 #define NBLOCKS ((int)(sizeof(BLOCKS) / sizeof(BLOCKS[0])))
 
@@ -296,6 +300,12 @@ void clocklab_run(i2c_master_bus_handle_t bus)
     gpio_config_t boot = {.pin_bit_mask = BIT64(PIN_BOOT), .mode = GPIO_MODE_INPUT, .pull_up_en = 1};
     gpio_config(&boot);
 
+    rec_t first;
+    if (rec_count() > 0 && rec_get(0, &first) && first.format != LAB_FORMAT) {
+        ESP_LOGW(TAG, "results from an older lab format: printing them now, then starting fresh");
+        print_results();
+        erase_run();
+    }
     int64_t last_print = 0, boot_down_since = 0;
     for (;;) {
         if (axp_vbus_good()) {
@@ -325,9 +335,11 @@ void clocklab_run(i2c_master_bus_handle_t bus)
         state_get(&cycle, &block);
         int mv = axp_battery_mv();
         if (cycle >= CYCLES || (mv > 0 && mv < LOW_MV)) {
-            ESP_LOGI(TAG, "%s: idle until USB", cycle >= CYCLES ? "run complete" : "battery low");
-            esp_sleep_enable_timer_wakeup(60ULL * 1000000);
-            esp_light_sleep_start();
+            ESP_LOGI(TAG, "%s: powering off (press PWR with USB connected to read the results)",
+                     cycle >= CYCLES ? "run complete" : "battery low");
+            vTaskDelay(pdMS_TO_TICKS(200));
+            axp_power_off();
+            vTaskDelay(pdMS_TO_TICKS(5000));
             continue;
         }
         if (run_block(cycle, block)) {
