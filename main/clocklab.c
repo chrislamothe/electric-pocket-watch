@@ -44,8 +44,8 @@
 
 static const char *TAG = "clocklab";
 
-#define LAB_FORMAT      2
-#define CYCLES          2
+#define LAB_FORMAT      3
+#define CYCLES          3
 #define REF_TRIES       3
 #define LOW_MV          3500
 #define PIN_BOOT        GPIO_NUM_0
@@ -68,15 +68,18 @@ typedef struct {
     uint32_t awake_s;
 } block_t;
 
-/* Format 2: format 1 showed no per-sleep error (0.2 s to 60 s sleeps all ~-7500 ppm) and a rate
- * that eases with sleep length (15 min ~-6700, 30 min ~-5200 ppm). This run maps long sleeps. */
+/* Format 3. Format 1/2 (1.75C): the sleep clock's error depends on how long each sleep lasts
+ * (it drifts after every sleep entry), is unusable for long sleeps, and is small (RC_SLOW, ~+50
+ * ppm) or constant (RC_FAST, -7500 ppm +-1%) for 1 s sleeps. This run maps short sleeps. */
 static const block_t BLOCKS[] = {
-    {"AWAKE", 0, 0, 1800},              /* 30 min CPU awake, no sleep */
-    {"SEC", 1800, 1000, 0},             /* 1800 x 1 s */
-    {"PROD", 4, 900000, 0},             /* 4 x 15 min (the watch's screen-off pattern) */
-    {"LONG", 2, 1800000, 0},            /* 2 x 30 min */
-    {"HOUR", 1, 3600000, 0},            /* 1 x 1 h */
-    {"3HOUR", 1, 10800000, 0},          /* 1 x 3 h */
+    {"AWAKE", 0, 0, 900},               /* 15 min CPU awake, no sleep */
+    {"S0.25", 7200, 250, 0},            /* 30 min each */
+    {"S0.5", 3600, 500, 0},
+    {"S1", 1800, 1000, 0},
+    {"S2", 900, 2000, 0},
+    {"S5", 360, 5000, 0},
+    {"S10", 180, 10000, 0},
+    {"S30", 60, 30000, 0},
 };
 #define NBLOCKS ((int)(sizeof(BLOCKS) / sizeof(BLOCKS[0])))
 
