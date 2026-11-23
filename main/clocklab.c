@@ -317,6 +317,11 @@ void clocklab_run(i2c_master_bus_handle_t bus)
             if (now - last_print > 20000000 || last_print == 0) {
                 last_print = now;
                 print_results();
+                int bmv = axp_battery_mv();
+                bool chg = axp_charge_state() == AXP_CHG_CHARGING;
+                printf("BATTERY %d mV, %d%% by voltage, PMIC gauge %d%%, %s\n", bmv, axp_battery_percent(),
+                       axp_gauge_percent(),
+                       chg ? "charging" : bmv >= 4150 ? "CHARGED - ready to unplug" : "not charging");
                 printf("On USB: experiments paused. Unplug to run. Hold BOOT 5 s to erase results.\n");
             }
             if (gpio_get_level(PIN_BOOT) == 0) {
