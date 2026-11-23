@@ -133,10 +133,15 @@ jobs:
       url: ${{ steps.deploy.outputs.page_url }}
     steps:
       - uses: actions/checkout@v7
+      # deploy-pages only sees the first 10 artifacts of a run: fold the firmware into one first.
+      - uses: actions/upload-artifact/merge@v4
+        with:
+          name: firmware-all
+          pattern: firmware-*
+          delete-merged: true
       - uses: actions/download-artifact@v8
         with:
-          pattern: firmware-*
-          merge-multiple: true
+          name: firmware-all
           path: fw
       - name: Assemble site
         shell: bash
