@@ -129,7 +129,39 @@ Battery 4.06 V -> 3.89 V over the run; no trend of error with voltage visible.
 7. On RTC boards the sleep clock's error is irrelevant to displayed time **if** the RTC is re-read on
    every wake before drawing. The RTC's own accuracy is not yet measured. [inferred / open]
 
-### 4.5 Running now
+### 4.5 Run 3: 1.75C, RC_FAST/256, short sleeps, 3 cycles, ~12 h [measured]
+
+| Sleep length | Cycle 0 | Cycle 1 | Cycle 2 (ppm of sleep time) |
+|---|---|---|---|
+| 0.25 s x 7200 | -7469 | -7504 | -7464 |
+| 0.5 s x 3600 | -7546 | -7502 | -7501 |
+| 1 s x 1800 | -7572 | -7515 | -7643 |
+| 2 s x 900 | -7573 | -7500 | -7570 |
+| 5 s x 360 | -7534 | -7550 | -7564 |
+| 10 s x 180 | -7546 | -7518 | -7524 |
+| 30 s x 60 | -7514 | -7446 | -7481 |
+| Awake 15 min | +125 | +113 | +31 (ppm overall; endpoint noise ~+-100 ms) |
+
+Findings:
+- Every sleep from 0.25 s to 60 s (runs 1 and 3, two days, n = 30 blocks) runs at **-7516 ppm,
+  sd 48 ppm**; run 1 mean -7495, run 3 mean -7526. The sd matches the SNTP endpoint noise
+  (+-100 ms over a 30 min block = +-55 ppm), so the oscillator's own spread is at or below that. [measured]
+- No dependence on sleep length within 0.25-60 s; the drift seen in runs 1-2 starts between 60 s
+  and 15 min. [measured]
+- Implied correction for sleep windows: multiply measured sleep time by 1/(1 - 7516e-6) = 1.0075733.
+  [measured mean; to be validated]
+- Design consequence [decision pending owner]: on the 1.75C, use RC_FAST/256, cap every light
+  sleep at 30 s (one extra wake per 30 s, negligible battery), and apply the constant above via the
+  holdover record. RC_SLOW is not needed for this path.
+
+### 4.6 Running next
+
+Lab format 4 (v0.15.5): AWAKE 15 min, then 6 x 2 h blocks of 30 s sleeps with a 5 s awake spell every
+10 min (watch-like), PMIC die temperature logged at each block end. Purpose: confirm the constant
+over 2 h blocks (endpoint noise ~+-15 ppm) and look for temperature dependence (desk run and a
+warm/pocket run).
+
+### 4.7 Earlier plan for run 3 (superseded)
 
 Lab format 3 (v0.15.4): AWAKE 15 min, then 30 min each of 0.25, 0.5, 1, 2, 5, 10, 30 s sleeps, 3 cycles
 (~12 h). Planned: 1.75C on RC_SLOW (variant B) and 1.75-B on RC_FAST (variant A, also measures RTC rate)
