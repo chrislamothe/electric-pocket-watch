@@ -56,3 +56,6 @@ void axp_power_off(void);            /* PMIC turns every rail off; USB or the PW
 /* Power-key press latched by the PMIC (for boards where PWR is not on a wake-capable GPIO). */
 bool axp_pkey_latch_enable(void);          /* true when the enable bit reads back set */
 bool axp_pkey_pressed_latched(void);        /* true once per press; clears the latch */
+
+/* PMIC die temperature in tenths of a degree C (coarse ambient proxy); INT16_MIN if unreadable. */
+int16_t axp_die_temp_c10(void);

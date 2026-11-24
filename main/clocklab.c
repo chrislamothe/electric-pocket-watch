@@ -44,8 +44,8 @@
 
 static const char *TAG = "clocklab";
 
-#define LAB_FORMAT      3
-#define CYCLES          3
+#define LAB_FORMAT      4
+#define CYCLES          1
 #define REF_TRIES       3
 #define LOW_MV          3500
 #define PIN_BOOT        GPIO_NUM_0
@@ -66,20 +66,22 @@ typedef struct {
     uint32_t count;          /* sleeps (0 = stay awake for awake_s) */
     uint32_t sleep_ms;       /* requested per sleep */
     uint32_t awake_s;
+    uint32_t awake_every;    /* stay awake awake_ms after every this many sleeps (0 = never) */
+    uint32_t awake_ms;
 } block_t;
 
-/* Format 3. Format 1/2 (1.75C): the sleep clock's error depends on how long each sleep lasts
- * (it drifts after every sleep entry), is unusable for long sleeps, and is small (RC_SLOW, ~+50
- * ppm) or constant (RC_FAST, -7500 ppm +-1%) for 1 s sleeps. This run maps short sleeps. */
+/* Format 4 - validation. Format 3 (1.75C, RC_FAST/256): every sleep from 0.25 s to 30 s runs at
+ * -7526 ppm (sd 45 ppm over 21 blocks, about the network-time endpoint noise). This run checks
+ * that constant over long, watch-like blocks: 30 s sleeps with a 5 s awake spell every 10 min, in
+ * 2 h blocks (longer blocks shrink the endpoint noise), with the PMIC die temperature logged. */
 static const block_t BLOCKS[] = {
-    {"AWAKE", 0, 0, 900},               /* 15 min CPU awake, no sleep */
-    {"S0.25", 7200, 250, 0},            /* 30 min each */
-    {"S0.5", 3600, 500, 0},
-    {"S1", 1800, 1000, 0},
-    {"S2", 900, 2000, 0},
-    {"S5", 360, 5000, 0},
-    {"S10", 180, 10000, 0},
-    {"S30", 60, 30000, 0},
+    {"AWAKE", 0, 0, 900, 0, 0},         /* 15 min CPU awake, no sleep */
+    {"P30a", 240, 30000, 0, 20, 5000},  /* 2 h each: 240 x 30 s, 5 s awake every 20 sleeps */
+    {"P30b", 240, 30000, 0, 20, 5000},
+    {"P30c", 240, 30000, 0, 20, 5000},
+    {"P30d", 240, 30000, 0, 20, 5000},
+    {"P30e", 240, 30000, 0, 20, 5000},
+    {"P30f", 240, 30000, 0, 20, 5000},
 };
 #define NBLOCKS ((int)(sizeof(BLOCKS) / sizeof(BLOCKS[0])))
 
@@ -90,6 +92,7 @@ typedef struct {
     int64_t ref0_utc, ref0_mono, ref1_utc, ref1_mono;
     int64_t rtc0_s, rtc0_mono, rtc1_s, rtc1_mono;   /* 0 when no RTC / read failed */
     int16_t mv0, mv1;
+    int16_t t0, t1;                     /* PMIC die temperature, 0.1 degC */
     uint32_t req_ms;
 } rec_t;
 
@@ -148,17 +151,17 @@ static void print_results(void)
     printf("\n=== CLOCKLAB %s %s board %s variant %s: %d records, next cycle %d block %d of %d x %d ===\n",
            WATCH_NAME, WATCH_VERSION, BOARD_SHORT, VARIANT_NAME, n, cycle, block, CYCLES, NBLOCKS);
     printf("LABCSV,format,variant,cycle,block,name,n_ok,n_rej,req_ms,S_us,ref0_utc,ref0_mono,ref1_utc,ref1_mono,"
-           "rtc0_s,rtc0_mono,rtc1_s,rtc1_mono,mv0,mv1\n");
+           "rtc0_s,rtc0_mono,rtc1_s,rtc1_mono,mv0,mv1,t0_c10,t1_c10\n");
     for (int i = 0; i < n; i++) {
         rec_t r;
         if (!rec_get(i, &r)) {
             continue;
         }
         printf("LABCSV,%u,%u,%u,%u,%s,%" PRIu32 ",%" PRIu32 ",%" PRIu32 ",%" PRId64 ",%" PRId64 ",%" PRId64 ",%" PRId64
-               ",%" PRId64 ",%" PRId64 ",%" PRId64 ",%" PRId64 ",%" PRId64 ",%d,%d\n",
+               ",%" PRId64 ",%" PRId64 ",%" PRId64 ",%" PRId64 ",%" PRId64 ",%d,%d,%d,%d\n",
                r.format, r.variant, r.cycle, r.block, r.block < NBLOCKS ? BLOCKS[r.block].name : "?", r.n_ok, r.n_rej,
                r.req_ms, r.s_us, r.ref0_utc, r.ref0_mono, r.ref1_utc, r.ref1_mono, r.rtc0_s, r.rtc0_mono, r.rtc1_s,
-               r.rtc1_mono, r.mv0, r.mv1);
+               r.rtc1_mono, r.mv0, r.mv1, r.t0, r.t1);
     }
     /* Derived, for reading at a glance (the CSV above is the data). */
     for (int i = 0; i < n; i++) {
@@ -174,7 +177,7 @@ static void print_results(void)
         if (r.n_ok) {
             printf(", %+7.0f ppm of sleep time, %+8.1f ms per sleep", err / (double)r.s_us * 1e6, err / r.n_ok / 1000);
         }
-        printf(") sleeps %" PRIu32 " ok %" PRIu32 " rejected", r.n_ok, r.n_rej);
+        printf(") sleeps %" PRIu32 " ok %" PRIu32 " rejected, %.1f..%.1f C", r.n_ok, r.n_rej, r.t0 / 10.0, r.t1 / 10.0);
         if (r.rtc0_s && r.rtc1_s) {
             /* UTC at each RTC rollover, from the nearest network reference across awake-only gaps. */
             double u0 = (double)r.ref0_utc + (double)(r.rtc0_mono - r.ref0_mono);
@@ -242,6 +245,7 @@ static bool run_block(int cycle, int b)
     }
     rtc_mark(&r.rtc0_s, &r.rtc0_mono);
     r.mv0 = (int16_t)axp_battery_mv();
+    r.t0 = axp_die_temp_c10();
     ESP_LOGI(TAG, "cycle %d block %s: running", cycle, bl->name);
     vTaskDelay(pdMS_TO_TICKS(100));                  /* let the log drain */
     int64_t next_check = esp_timer_get_time() + 60000000;
@@ -259,6 +263,9 @@ static bool run_block(int cycle, int b)
     } else {
         for (uint32_t i = 0; i < bl->count; i++) {
             light_sleep_ms(bl->sleep_ms, &r);
+            if (bl->awake_every && (i + 1) % bl->awake_every == 0) {
+                vTaskDelay(pdMS_TO_TICKS(bl->awake_ms));     /* like a screen wake */
+            }
             if (esp_timer_get_time() > next_check) {
                 next_check = esp_timer_get_time() + 60000000;
                 if (axp_vbus_good()) {
@@ -269,6 +276,7 @@ static bool run_block(int cycle, int b)
     }
     rtc_mark(&r.rtc1_s, &r.rtc1_mono);
     r.mv1 = (int16_t)axp_battery_mv();
+    r.t1 = axp_die_temp_c10();
     if (!reference(&r.ref1_utc, &r.ref1_mono)) {
         return false;
     }

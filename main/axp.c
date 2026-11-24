@@ -1,4 +1,5 @@
 #include "axp.h"
+#include <stdint.h>
 #include "i2c_dev.h"
 #include "esp_log.h"
 #include "freertos/FreeRTOS.h"
@@ -258,4 +259,24 @@ void axp_power_off(void)
     if (rd(0x10, &v)) {
         i2c_reg_write(s_axp, 0x10, v | 0x01);              /* software power-off */
     }
+}
+
+/* AXP2101 die temperature (ADC channel enable 0x30 bit 4; result 0x3C[5:0]:0x3D; degC =
+ * 22 + (7274 - raw) / 20, XPowersLib). Tenths of a degree; INT16_MIN if unreadable.
+ * The PMIC's own die, near but not inside the ESP32: a coarse ambient proxy. */
+int16_t axp_die_temp_c10(void)
+{
+    uint8_t en = 0, h = 0, l = 0;
+    if (!s_axp || i2c_reg_read(s_axp, 0x30, &en, 1) != ESP_OK) {
+        return INT16_MIN;
+    }
+    if (!(en & 0x10)) {
+        i2c_reg_write(s_axp, 0x30, en | 0x10);
+        vTaskDelay(pdMS_TO_TICKS(20));
+    }
+    if (i2c_reg_read(s_axp, 0x3C, &h, 1) != ESP_OK || i2c_reg_read(s_axp, 0x3D, &l, 1) != ESP_OK) {
+        return INT16_MIN;
+    }
+    int raw = ((h & 0x3F) << 8) | l;
+    return (int16_t)(220 + (7274 - raw) / 2);
 }
