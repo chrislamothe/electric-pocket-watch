@@ -82,7 +82,8 @@
   <div class="card">
     <h2>Clock lab (diagnostic, not a watch)</h2>
     <p class="dim warn">Replaces the watch firmware with a timekeeping test. The screen stays dark. Reinstall a watch build afterwards.</p>
-    <p class="dim">Install, save Wi-Fi from this page, unplug, and leave the watch alone for about 14 hours (3 cycles of 6 experiments, each checked against network time). Then plug it in: it prints its results over USB every 20 seconds (Logs &amp; Console). Variant A is the watch's current sleep clock, B the other internal one. Hold BOOT 5 s while on USB to erase results and start again.</p>
+    <p class="dim">Current lab: <b>v4, validation</b> (version <span id="v-lab">__VERSION__</span>): a 15 min awake check, then 6 blocks of 2 h with 30 s sleeps and a 5 s wake every 10 min, each checked against network time, with temperature logged. About 12.5 hours. Every button below installs this same lab; A and B differ only in the sleep clock (A = the watch's current one).</p>
+    <p class="dim">Charge to full (on USB it shows "CHARGED - ready to unplug" in Logs &amp; Console), save Wi-Fi from this page, unplug, and leave it in Wi-Fi range. When done it powers itself off: plug in USB, press PWR, open Logs &amp; Console and save the log. Hold BOOT 5 s while on USB to erase results and start again.</p>
     <div class="boards">
         <esp-web-install-button data-manifest="manifest-lab-175c-fast.json">
           <button slot="activate">1.75C lab A: RC_FAST/256</button>
@@ -156,7 +157,7 @@ const stamp = Date.now();
 document.querySelectorAll('esp-web-install-button[data-manifest]').forEach((b) => {
   b.setAttribute('manifest', b.dataset.manifest + '?t=' + stamp);
 });
-for (const [id, file] of [['v-stable', 'manifest-stable.json'], ['v-test', 'manifest-175c.json']]) {
+for (const [id, file] of [['v-stable', 'manifest-stable.json'], ['v-test', 'manifest-175c.json'], ['v-lab', 'manifest-lab-175c-fast.json']]) {
   fetch(file + '?t=' + stamp, { cache: 'no-store' })
     .then((r) => r.json())
     .then((m) => { document.getElementById(id).textContent = m.version; })
