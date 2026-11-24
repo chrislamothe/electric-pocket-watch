@@ -225,6 +225,24 @@ generation; "Time not set" instead of a build-time dial; RTC written only from n
 - Offline fit tool (Python): weighted least squares from lab CSV; refuses ill-conditioned data.
 - Host tests in CI covering spec 15 and 18.10 cases using the real model code.
 
+### Phase 2b - Calibration policy [decision, 2026-11-24]
+- No always-running adaptive service yet. During normal operation the watch only **collects**
+  low-cost observations (A, S, N, sleep regime, PMIC temperature, reference endpoints) on wakes and
+  references that already happen: no extra wakeups, no flash writes per sleep.
+- Candidate models are **fitted offline** from those observations and lab data.
+- **Automatic promotion** on the watch is added only if held-out tests show it improves accuracy;
+  until then the current qualified model stays active.
+- Auto-calibration, if built, is **opt-in**.
+- 1.75C: an optional, visible daily Wi-Fi reference is a candidate tradeoff. Its energy is not
+  measured (0.14 mAh/sync assumed 100 mA for 5 s); measure association time, failures and current
+  first, and prefer reusing an already-scheduled sync.
+- RTC boards: RTC reads on wakes that already happen are useful observations of the sleep clock,
+  but repeated reads of the same RTC cannot establish the RTC's absolute accuracy. Offset-register
+  calibration needs independent references over long intervals. Sleep-clock calibration is not
+  needed on these boards while the RTC restores time directly.
+- Model scope: duration effects justify separate regimes (short sleeps <= 60 s; long sleeps), not
+  a per-length model; no temperature term unless measurements require it.
+
 ### Phase 3 - Service and integration
 - One clock service task with a bounded request queue; lock-free snapshot reads.
 - Sleep prepare/resume handshake with token; no lock across sleep; `M_before`/`M_after` taken adjacent to
