@@ -308,6 +308,7 @@ void clocklab_run(i2c_master_bus_handle_t bus)
     parked_init(bus);                                /* same peripheral power as the watch */
     touch_sleep_only(bus);
     s_rtc = pcf_init(bus);
+    axp_die_temp_c10();                              /* enables the ADC channel; first reading is invalid */
     gpio_config_t boot = {.pin_bit_mask = BIT64(PIN_BOOT), .mode = GPIO_MODE_INPUT, .pull_up_en = 1};
     gpio_config(&boot);
 

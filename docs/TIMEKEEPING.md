@@ -161,7 +161,29 @@ Lab format 4 (v0.15.5): AWAKE 15 min, then 6 x 2 h blocks of 30 s sleeps with a 
 over 2 h blocks (endpoint noise ~+-15 ppm) and look for temperature dependence (desk run and a
 warm/pocket run).
 
-### 4.7 Earlier plan for run 3 (superseded)
+### 4.7 Run 4: 1.75C, RC_FAST/256, validation, 12.5 h [measured]
+
+6 blocks of 2 h, each 240 x 30 s sleeps with a 5 s awake spell every 20 sleeps (69 s awake per
+block). PMIC die temperature 28.9-30.7 C throughout (first AWAKE reading invalid: ADC not yet enabled).
+
+| Block | P30a | P30b | P30c | P30d | P30e | P30f |
+|---|---|---|---|---|---|---|
+| ppm of sleep time | -7400 | -7449 | -7449 | -7447 | -7450 | -7430 |
+
+Findings:
+- **Within a run the rate is extremely stable**: -7445 ppm, sd 8.5 ppm over P30b-f (first block
+  -7400, possibly settling after the awake block). With a constant fitted on the same day the
+  residual would be under 1 s/day. [measured]
+- **Between runs the constant moves**: run 1 short sleeps -7495, run 3 -7526 (its 30 s blocks -7480),
+  run 4 -7438 ppm. Span ~90 ppm across three days, i.e. a single fixed constant leaves up to
+  about +-45 ppm (~+-4 s/day). [measured]
+- The cause of the run-to-run shift is not known; temperature is the leading candidate but run 4
+  covered only ~2 C. [open]
+- Consequence: for <= 2 s/day on the 1.75C, either (a) a temperature term, if a wider-temperature run
+  shows the shift tracks temperature, or (b) an occasional independent reference (e.g. the optional
+  daily sync) that re-measures the current constant. (b) works whatever the cause. [inferred]
+
+### 4.8 Earlier plan for run 3 (superseded)
 
 Lab format 3 (v0.15.4): AWAKE 15 min, then 30 min each of 0.25, 0.5, 1, 2, 5, 10, 30 s sleeps, 3 cycles
 (~12 h). Planned: 1.75C on RC_SLOW (variant B) and 1.75-B on RC_FAST (variant A, also measures RTC rate)
