@@ -130,7 +130,7 @@ jobs:
       id-token: write
     environment:
       name: github-pages
-      url: ${{ steps.deploy.outputs.page_url }}
+      url: ${{ steps.deploy1.outputs.page_url || steps.deploy2.outputs.page_url || steps.deploy.outputs.page_url }}
     steps:
       - uses: actions/checkout@v7
       # deploy-pages only sees the first 10 artifacts of a run: fold the firmware into one first.
@@ -175,5 +175,19 @@ jobs:
       - uses: actions/upload-pages-artifact@v5
         with:
           path: _site
+      # deploy-pages intermittently fails to find the just-uploaded artifact
+      # ("Fetching artifact metadata failed"); wait and try again before giving up.
+      - id: deploy1
+        continue-on-error: true
+        uses: actions/deploy-pages@v5
+      - if: steps.deploy1.outcome == 'failure'
+        run: sleep 60
+      - id: deploy2
+        if: steps.deploy1.outcome == 'failure'
+        continue-on-error: true
+        uses: actions/deploy-pages@v5
+      - if: steps.deploy1.outcome == 'failure' && steps.deploy2.outcome == 'failure'
+        run: sleep 120
       - id: deploy
+        if: steps.deploy1.outcome == 'failure' && steps.deploy2.outcome == 'failure'
         uses: actions/deploy-pages@v5
