@@ -60,3 +60,4 @@ int net_scan(net_ap_t *out, int max);
 /* Clock lab: one SNTP measurement (UTC and the esp_timer instant it arrived); the clock is not touched. */
 #include <stdint.h>
 bool net_measure_time(int64_t *utc_us, int64_t *mono_us);
+const char *net_measure_last_text(void);     /* why the last measurement failed */

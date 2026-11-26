@@ -16,6 +16,7 @@
 #include "net.h"
 #include "parked.h"
 #include "touch.h"
+#include "settings.h"
 #include "version.h"
 
 /*
@@ -199,7 +200,13 @@ static bool reference(int64_t *utc, int64_t *mono)
         if (net_measure_time(utc, mono)) {
             return true;
         }
-        ESP_LOGW(TAG, "network time failed (try %d)", i + 1);
+        ESP_LOGW(TAG, "network time failed (try %d): %s", i + 1, net_measure_last_text());
+        int32_t nf = 0;
+        nvs_get_i32(s_nvs, "reffail", &nf);
+        nvs_set_i32(s_nvs, "reffail", nf + 1);
+        nvs_set_str(s_nvs, "lastfail", net_measure_last_text());
+        nvs_set_i64(s_nvs, "lastfail_t", esp_timer_get_time() / 1000000);
+        nvs_commit(s_nvs);
         vTaskDelay(pdMS_TO_TICKS(10000));
     }
     return false;
@@ -331,6 +338,15 @@ void clocklab_run(i2c_master_bus_handle_t bus)
                 printf("BATTERY %d mV, %d%% by voltage, PMIC gauge %d%%, %s\n", bmv, axp_battery_percent(),
                        axp_gauge_percent(),
                        chg ? "charging" : bmv >= 4150 ? "CHARGED - ready to unplug" : "not charging");
+                char ssid[33] = "", why[48] = "";
+                int32_t nf = 0;
+                int64_t ft = 0;
+                size_t wl = sizeof(why);
+                nvs_get_i32(s_nvs, "reffail", &nf);
+                nvs_get_i64(s_nvs, "lastfail_t", &ft);
+                nvs_get_str(s_nvs, "lastfail", why, &wl);
+                printf("WIFI saved network: %s\n", settings_get_str("ssid", ssid, sizeof(ssid)) && ssid[0] ? ssid : "NONE - save Wi-Fi from the install page");
+                printf("NETWORK TIME failures this run: %ld%s%s\n", (long)nf, nf ? ", last: " : "", nf ? why : "");
                 printf("On USB: experiments paused. Unplug to run. Hold BOOT 5 s to erase results.\n");
             }
             if (gpio_get_level(PIN_BOOT) == 0) {
