@@ -297,6 +297,7 @@ static bool run_block(int cycle, int b)
 static void erase_run(void)
 {
     nvs_erase_all(s_nvs);
+    nvs_set_str(s_nvs, "ver", WATCH_VERSION);
     nvs_commit(s_nvs);
     ESP_LOGW(TAG, "results erased: a new run starts when USB is unplugged");
 }
@@ -319,11 +320,19 @@ void clocklab_run(i2c_master_bus_handle_t bus)
     gpio_config_t boot = {.pin_bit_mask = BIT64(PIN_BOOT), .mode = GPIO_MODE_INPUT, .pull_up_en = 1};
     gpio_config(&boot);
 
-    rec_t first;
-    if (rec_count() > 0 && rec_get(0, &first) && first.format != LAB_FORMAT) {
-        ESP_LOGW(TAG, "results from an older lab format: printing them now, then starting fresh");
-        print_results();
+    /* A newly installed lab version starts a new run. Without this, results of a finished run left
+     * in NVS made a fresh install think it was already done and power off at once. */
+    char ver[24] = "";
+    size_t vl = sizeof(ver);
+    nvs_get_str(s_nvs, "ver", ver, &vl);
+    if (strcmp(ver, WATCH_VERSION) != 0) {
+        if (rec_count() > 0) {
+            ESP_LOGW(TAG, "results from lab %s: printing them, then starting a new run", ver[0] ? ver : "(older)");
+            print_results();
+        }
         erase_run();
+        nvs_set_str(s_nvs, "ver", WATCH_VERSION);
+        nvs_commit(s_nvs);
     }
     int64_t last_print = 0, boot_down_since = 0;
     for (;;) {
