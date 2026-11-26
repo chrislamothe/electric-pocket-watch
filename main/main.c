@@ -17,6 +17,8 @@
 #include "board.h"
 #include "axp.h"
 #include "battlog.h"
+#include "evlog.h"
+#include "esp_system.h"
 #include "buttons.h"
 #include "controller.h"
 #include "display.h"
@@ -52,6 +54,8 @@ void app_main(void)
 {
     improv_start();                             /* USB serial driver first: console goes through it */
     ESP_LOGI(TAG, "%s %s for %s (built %s %s)", WATCH_NAME, WATCH_VERSION, BOARD_NAME, __DATE__, __TIME__);
+    evlog_add("boot", WATCH_VERSION, esp_reset_reason(), 0);
+    evlog_dump();                               /* what led up to this boot (survives resets, not power-off) */
     settings_init();
     net_init();
     settings_ui_init();

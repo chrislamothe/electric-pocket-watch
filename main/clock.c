@@ -14,6 +14,7 @@
 #include "clock_rtc.h"
 #include "net.h"
 #include "settings.h"
+#include "evlog.h"
 
 static const char *TAG = "clock";
 
@@ -162,6 +163,7 @@ static void take_reference(int64_t utc, int64_t m, const char *what)
             s_ppm_ok = true;
             int p10 = (int)lrint(s_ppm * 10);
             settings_set_int("slp_ppm10", p10 ? p10 : 1);
+            evlog_add("slp_err", what, (int32_t)(err / 1000), (int32_t)(s_slept_us / 1000000));
             ESP_LOGI(TAG, "%s: sleep clock was %+lld ms off after %.1f min asleep (%+.0f ppm; using %+.0f ppm)",
                      what, (long long)(err / 1000), s_slept_us / 6e7, ppm, s_ppm);
         } else {
@@ -207,6 +209,7 @@ static void rtc_refine(void)
     clock_source_t src = (s_source == CLOCK_SRC_NETWORK && llabs(shift) < 2000000) ? CLOCK_SRC_NETWORK : CLOCK_SRC_RTC;
     publish(utc, m, CLOCK_READY, src);
     if (llabs(shift) >= 5000) {
+        evlog_add("rtc_fix", "", (int32_t)(shift / 1000), (int32_t)win);
         ESP_LOGI(TAG, "re-anchored on the RTC: %+lld ms (rollover bracket %lld us)", (long long)(shift / 1000),
                  (long long)win);
     }
@@ -217,6 +220,7 @@ static void rtc_refine(void)
 static void auto_sync_task(void *arg)
 {
     (void)arg;
+    evlog_add("sync", "auto", 0, 0);
     net_result_t r = net_sync_time();
     ESP_LOGI(TAG, "automatic sync: %s", net_result_text(r));
     if (r != NET_OK && r != NET_OK_OPEN) {
@@ -460,6 +464,7 @@ bool clock_sntp_wait_apply(int timeout_ms)
     publish(utc, m, CLOCK_READY, CLOCK_SRC_NETWORK);
     s_mono_net = m;
     s_next_auto = mono() + (s_rtc ? AUTO_SYNC_RTC_US : AUTO_SYNC_RC_US);
+    evlog_add("net_fix", was_set ? "shift" : "set", was_set ? (int32_t)(off / 1000) : 0, 0);
     if (was_set) {
         ESP_LOGI(TAG, "network time: clock was %+lld ms off", (long long)(off / 1000));
     } else {

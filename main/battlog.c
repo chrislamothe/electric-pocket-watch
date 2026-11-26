@@ -1,4 +1,5 @@
 #include "battlog.h"
+#include "evlog.h"
 
 #include <stdio.h>
 #include <string.h>
@@ -211,6 +212,7 @@ void battlog_dump(void)
     for_each(dump_one, NULL);
     printf("BATTLOG,end,shutdown_mv=%d,charge_target_mv=%d\n", axp_shutdown_mv(), axp_charge_target_mv());
     fflush(stdout);
+    evlog_dump();
 }
 
 typedef struct {

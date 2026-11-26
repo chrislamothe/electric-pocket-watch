@@ -9,11 +9,13 @@
 #include "esp_event.h"
 #include "esp_heap_caps.h"
 #include "esp_log.h"
+#include "esp_timer.h"
 #include "esp_netif.h"
 #include "esp_netif_sntp.h"
 #include "clock.h"
 #include "esp_wifi.h"
 #include "settings.h"
+#include "evlog.h"
 
 static const char *TAG = "net";
 
@@ -85,6 +87,7 @@ static void on_event(void *arg, esp_event_base_t base, int32_t id, void *data)
         }
         wifi_event_sta_disconnected_t *d = data;
         ESP_LOGI(TAG, "disconnected, reason %d", d ? d->reason : -1);
+        evlog_add("wifi_dis", "", d ? d->reason : -1, 0);
         if (s_retries++ < MAX_RETRIES) {
             esp_wifi_connect();
         } else {
@@ -272,8 +275,11 @@ net_result_t net_sync_time(void)
         return NET_BUSY;
     }
 
+    int64_t t_start = esp_timer_get_time();
+    evlog_add("wifi_go", s_measure_only ? "measure" : "sync", have_saved, allow_open);
     static net_ap_t aps[MAX_SCAN];
     int n = scan_locked(aps, MAX_SCAN);
+    evlog_add("wifi_scn", "", n, 0);
     net_result_t r = NET_NOT_FOUND;
     const char *used = "";
 
@@ -328,6 +334,7 @@ net_result_t net_sync_time(void)
     }
     wifi_release();
     record(r, used);
+    evlog_add("wifi_end", net_result_text(r), r, (int32_t)((esp_timer_get_time() - t_start) / 1000));
     ESP_LOGI(TAG, "time sync result: %s", net_result_text(r));
     xSemaphoreGive(s_lock);
     return r;

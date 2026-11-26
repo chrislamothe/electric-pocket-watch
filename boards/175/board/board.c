@@ -1,4 +1,7 @@
 #include "board.h"
+#include "esp_timer.h"
+/* evlog lives in main, which this component cannot depend on: weak reference, checked before use */
+extern void evlog_add(const char *what, const char *tag, int32_t a, int32_t b) __attribute__((weak));
 
 #include "esp_log.h"
 
@@ -38,5 +41,20 @@ void board_init(i2c_master_bus_handle_t bus)
 bool board_pwr_down(void)
 {
     uint8_t reg = TCA9554_INPUT, in = 0;
-    return s_exp && i2c_master_transmit_receive(s_exp, &reg, 1, &in, 1, 20) == ESP_OK && (in & EXIO_SYS_OUT);
+    if (!s_exp) {
+        return false;
+    }
+    esp_err_t e = i2c_master_transmit_receive(s_exp, &reg, 1, &in, 1, 20);
+    if (e != ESP_OK) {
+        static int64_t s_last_ms;
+        int64_t now = esp_timer_get_time() / 1000;
+        if (now - s_last_ms > 1000) {                /* at most one entry per second */
+            s_last_ms = now;
+            if (evlog_add) {
+                evlog_add("i2c_err", "TCA9554", e, 0);
+            }
+        }
+        return false;
+    }
+    return (in & EXIO_SYS_OUT) != 0;
 }

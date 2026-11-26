@@ -19,6 +19,7 @@
 #include "settings_ui.h"
 #include "touch.h"
 #include "clock.h"
+#include "evlog.h"
 #include "splash.h"
 #include "lowpower.h"
 
@@ -129,6 +130,7 @@ static void screen_on(const char *why)
     int pct = axp_rest_percent();
     ESP_LOGI(TAG, "battery %d mV, gauge %d%%, charge state %d", axp_battery_mv(), axp_gauge_percent(),
              axp_charge_state());
+    evlog_add("scr_on", why, pct, axp_vbus_good());
     ESP_LOGI(TAG, "screen ON (%s), battery %d%%, VBUS %d, internal DMA free %u (largest %u)", why, pct,
              axp_vbus_good(), (unsigned)heap_caps_get_free_size(MALLOC_CAP_INTERNAL | MALLOC_CAP_DMA),
              (unsigned)heap_caps_get_largest_free_block(MALLOC_CAP_INTERNAL | MALLOC_CAP_DMA));
@@ -153,6 +155,7 @@ static void screen_on(const char *why)
 static void screen_off(const char *why)
 {
     ESP_LOGI(TAG, "screen OFF (%s)", why);
+    evlog_add("scr_off", why, (int32_t)s_awake_ms, 0);
     settings_ui_close();
     touch_set_active(false);
     touch_wait_settled(300);                         /* touch controller asleep before light sleep */
@@ -271,6 +274,7 @@ static void run_screen_on(void)
                 break;
             }
             ESP_LOGI(TAG, "BOOT long: Wi-Fi time sync");
+            evlog_add("sync", "user", 0, 0);
             faces_show_status("Syncing time...", 0);
             net_result_t r = net_sync_time();
             ESP_LOGI(TAG, "time sync: %s", net_result_text(r));
@@ -313,6 +317,7 @@ static void run_screen_on(void)
             bool was_usb = s_vbus;
             vbus_poll();
             if (s_vbus != was_usb) {
+                evlog_add("usb", s_vbus ? "in" : "out", axp_battery_mv(), 0);
                 touch_activity();                    /* plugged or unplugged: restart the timer */
                 restore_from_dim();
                 idle = 0;
@@ -328,6 +333,7 @@ static void run_screen_on(void)
                     restore_from_dim();              /* button pressed */
                 }
             } else if (timed_out) {
+                evlog_add("idle", settings_ui_is_open() ? "settings" : "face", (int32_t)idle, (int32_t)limit);
                 restore_from_dim();
                 screen_off("timeout");
                 return;
@@ -389,6 +395,7 @@ static bool wake_confirmed(wake_src_t w)
         vTaskDelay(pdMS_TO_TICKS(10));
         if (wake_pins() != w) {
             s_false_wakes++;
+            evlog_add("glitch", w == WAKE_BOOT ? "BOOT" : "PWR", (int32_t)s_false_wakes, 0);
             ESP_LOGW(TAG, "%s glitch ignored (%lu so far)", w == WAKE_BOOT ? "BOOT" : "PWR",
                      (unsigned long)s_false_wakes);
             return false;
@@ -483,10 +490,12 @@ static void run_screen_off(void)
     wait_buttons_released(3000);                     /* a held button would reject every sleep */
     if (buttons_boot_down_raw()) {
         s_ignore_boot = true;
+        evlog_add("stuck", "BOOT", 0, 0);
         ESP_LOGW(TAG, "BOOT reads pressed 3 s after screen off: ignored until released");
     }
     if (buttons_pwr_down_raw()) {
         s_ignore_pwr = true;
+        evlog_add("stuck", "PWR", 0, 0);
         ESP_LOGW(TAG, "PWR reads pressed 3 s after screen off: ignored until released");
     }
 #if BOARD_PWR_POLL_MS > 0

@@ -1,4 +1,5 @@
 #include "buttons.h"
+#include "evlog.h"
 
 #include "esp_timer.h"
 
@@ -80,6 +81,8 @@ static int step(button_t *b)
                 b->consumed = false;
             } else {
                 bool short_press = !b->consumed && !b->long_fired;
+                evlog_add(short_press ? "btn" : "btn_end", b == &s_pwr ? "PWR" : "BOOT", (int32_t)(t - b->down_at_ms),
+                          b->long_fired);
                 b->consumed = true;
                 return short_press ? 1 : 0;
             }
@@ -89,6 +92,7 @@ static int step(button_t *b)
     }
     if (b->down && !b->consumed && !b->long_fired && (t - b->down_at_ms) >= LONG_PRESS_MS) {
         b->long_fired = true;
+        evlog_add("btn_long", b == &s_pwr ? "PWR" : "BOOT", (int32_t)(t - b->down_at_ms), 0);
         return 2;
     }
     return 0;
