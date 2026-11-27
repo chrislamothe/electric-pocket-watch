@@ -6,4 +6,4 @@
 #else
 #define WATCH_NAME    "Electric Pocket Watch"
 #endif
-#define WATCH_VERSION "0.15.9"
+#define WATCH_VERSION "0.15.10"

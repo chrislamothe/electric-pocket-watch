@@ -4,6 +4,7 @@
 #include <stdio.h>
 #include <string.h>
 #include "driver/gpio.h"
+#include "driver/temperature_sensor.h"
 #include "esp_log.h"
 #include "esp_sleep.h"
 #include "esp_timer.h"
@@ -45,8 +46,8 @@
 
 static const char *TAG = "clocklab";
 
-#define LAB_FORMAT      4
-#define CYCLES          1
+#define LAB_FORMAT      5
+#define CYCLES          48       /* 48 x 2 h = 4 days, or until the battery reaches LOW_MV */
 #define REF_TRIES       3
 #define LOW_MV          3500
 #define PIN_BOOT        GPIO_NUM_0
@@ -71,18 +72,19 @@ typedef struct {
     uint32_t awake_ms;
 } block_t;
 
-/* Format 4 - validation. Format 3 (1.75C, RC_FAST/256): every sleep from 0.25 s to 30 s runs at
+/* Format 5 - multi-day. Format 4 (cold pack, 3..27 C on the PMIC die) gave about +4 ppm/C, but one
+ * block broke the line and run-to-run shifts of ~70 ppm at room temperature are as large as the
+ * whole temperature effect. This run repeats one watch-like 2 h block for days at ordinary indoor
+ * temperatures: day-to-day and day/night variation, and which sensor tracks the error - the PMIC
+ * die (off-chip) or the ESP32's own sensor (same die as the RC_FAST oscillator), each averaged over
+ * the block from samples at every awake spell.
+ *
+ * Format 4 - validation. Format 3 (1.75C, RC_FAST/256): every sleep from 0.25 s to 30 s runs at
  * -7526 ppm (sd 45 ppm over 21 blocks, about the network-time endpoint noise). This run checks
  * that constant over long, watch-like blocks: 30 s sleeps with a 5 s awake spell every 10 min, in
  * 2 h blocks (longer blocks shrink the endpoint noise), with the PMIC die temperature logged. */
 static const block_t BLOCKS[] = {
-    {"AWAKE", 0, 0, 900, 0, 0},         /* 15 min CPU awake, no sleep */
-    {"P30a", 240, 30000, 0, 20, 5000},  /* 2 h each: 240 x 30 s, 5 s awake every 20 sleeps */
-    {"P30b", 240, 30000, 0, 20, 5000},
-    {"P30c", 240, 30000, 0, 20, 5000},
-    {"P30d", 240, 30000, 0, 20, 5000},
-    {"P30e", 240, 30000, 0, 20, 5000},
-    {"P30f", 240, 30000, 0, 20, 5000},
+    {"P30", 240, 30000, 0, 20, 5000},   /* 2 h: 240 x 30 s, 5 s awake every 20 sleeps */
 };
 #define NBLOCKS ((int)(sizeof(BLOCKS) / sizeof(BLOCKS[0])))
 
@@ -95,7 +97,24 @@ typedef struct {
     int16_t mv0, mv1;
     int16_t t0, t1;                     /* PMIC die temperature, 0.1 degC */
     uint32_t req_ms;
+    int16_t e0, e1;                     /* ESP32 on-die sensor, 0.1 degC (-999 = unavailable) */
+    int16_t e_avg, t_avg;               /* block averages of the samples at each awake spell */
+    uint16_t n_temp;                    /* samples in the averages */
 } rec_t;
+
+static temperature_sensor_handle_t s_tsens;
+
+/* ESP32 on-die temperature in 0.1 degC; the sensor is powered only for the reading. */
+static int16_t esp_temp_c10(void)
+{
+    float c = 0;
+    if (!s_tsens || temperature_sensor_enable(s_tsens) != ESP_OK) {
+        return -999;
+    }
+    esp_err_t e = temperature_sensor_get_celsius(s_tsens, &c);
+    temperature_sensor_disable(s_tsens);
+    return e == ESP_OK ? (int16_t)(c * 10 + (c >= 0 ? 0.5f : -0.5f)) : -999;
+}
 
 static nvs_handle_t s_nvs;
 static bool s_rtc;
@@ -152,17 +171,17 @@ static void print_results(void)
     printf("\n=== CLOCKLAB %s %s board %s variant %s: %d records, next cycle %d block %d of %d x %d ===\n",
            WATCH_NAME, WATCH_VERSION, BOARD_SHORT, VARIANT_NAME, n, cycle, block, CYCLES, NBLOCKS);
     printf("LABCSV,format,variant,cycle,block,name,n_ok,n_rej,req_ms,S_us,ref0_utc,ref0_mono,ref1_utc,ref1_mono,"
-           "rtc0_s,rtc0_mono,rtc1_s,rtc1_mono,mv0,mv1,t0_c10,t1_c10\n");
+           "rtc0_s,rtc0_mono,rtc1_s,rtc1_mono,mv0,mv1,t0_c10,t1_c10,e0_c10,e1_c10,e_avg_c10,t_avg_c10,n_temp\n");
     for (int i = 0; i < n; i++) {
         rec_t r;
         if (!rec_get(i, &r)) {
             continue;
         }
         printf("LABCSV,%u,%u,%u,%u,%s,%" PRIu32 ",%" PRIu32 ",%" PRIu32 ",%" PRId64 ",%" PRId64 ",%" PRId64 ",%" PRId64
-               ",%" PRId64 ",%" PRId64 ",%" PRId64 ",%" PRId64 ",%" PRId64 ",%d,%d,%d,%d\n",
+               ",%" PRId64 ",%" PRId64 ",%" PRId64 ",%" PRId64 ",%" PRId64 ",%d,%d,%d,%d,%d,%d,%d,%d,%u\n",
                r.format, r.variant, r.cycle, r.block, r.block < NBLOCKS ? BLOCKS[r.block].name : "?", r.n_ok, r.n_rej,
                r.req_ms, r.s_us, r.ref0_utc, r.ref0_mono, r.ref1_utc, r.ref1_mono, r.rtc0_s, r.rtc0_mono, r.rtc1_s,
-               r.rtc1_mono, r.mv0, r.mv1, r.t0, r.t1);
+               r.rtc1_mono, r.mv0, r.mv1, r.t0, r.t1, r.e0, r.e1, r.e_avg, r.t_avg, (unsigned)r.n_temp);
     }
     /* Derived, for reading at a glance (the CSV above is the data). */
     for (int i = 0; i < n; i++) {
@@ -178,7 +197,8 @@ static void print_results(void)
         if (r.n_ok) {
             printf(", %+7.0f ppm of sleep time, %+8.1f ms per sleep", err / (double)r.s_us * 1e6, err / r.n_ok / 1000);
         }
-        printf(") sleeps %" PRIu32 " ok %" PRIu32 " rejected, %.1f..%.1f C", r.n_ok, r.n_rej, r.t0 / 10.0, r.t1 / 10.0);
+        printf(") sleeps %" PRIu32 " ok %" PRIu32 " rejected, PMIC %.1f C avg, ESP32 %.1f C avg", r.n_ok, r.n_rej,
+               r.t_avg / 10.0, r.e_avg / 10.0);
         if (r.rtc0_s && r.rtc1_s) {
             /* UTC at each RTC rollover, from the nearest network reference across awake-only gaps. */
             double u0 = (double)r.ref0_utc + (double)(r.rtc0_mono - r.ref0_mono);
@@ -253,6 +273,8 @@ static bool run_block(int cycle, int b)
     rtc_mark(&r.rtc0_s, &r.rtc0_mono);
     r.mv0 = (int16_t)axp_battery_mv();
     r.t0 = axp_die_temp_c10();
+    r.e0 = esp_temp_c10();
+    int32_t esum = 0, tsum = 0;
     ESP_LOGI(TAG, "cycle %d block %s: running", cycle, bl->name);
     vTaskDelay(pdMS_TO_TICKS(100));                  /* let the log drain */
     int64_t next_check = esp_timer_get_time() + 60000000;
@@ -271,6 +293,12 @@ static bool run_block(int cycle, int b)
         for (uint32_t i = 0; i < bl->count; i++) {
             light_sleep_ms(bl->sleep_ms, &r);
             if (bl->awake_every && (i + 1) % bl->awake_every == 0) {
+                int16_t et = esp_temp_c10(), tt = axp_die_temp_c10();   /* before the spell: no self-heating */
+                if (et != -999) {
+                    esum += et;
+                    tsum += tt;
+                    r.n_temp++;
+                }
                 vTaskDelay(pdMS_TO_TICKS(bl->awake_ms));     /* like a screen wake */
             }
             if (esp_timer_get_time() > next_check) {
@@ -284,6 +312,11 @@ static bool run_block(int cycle, int b)
     rtc_mark(&r.rtc1_s, &r.rtc1_mono);
     r.mv1 = (int16_t)axp_battery_mv();
     r.t1 = axp_die_temp_c10();
+    r.e1 = esp_temp_c10();
+    if (r.n_temp) {
+        r.e_avg = (int16_t)(esum / r.n_temp);
+        r.t_avg = (int16_t)(tsum / r.n_temp);
+    }
     if (!reference(&r.ref1_utc, &r.ref1_mono)) {
         return false;
     }
@@ -317,6 +350,11 @@ void clocklab_run(i2c_master_bus_handle_t bus)
     touch_sleep_only(bus);
     s_rtc = pcf_init(bus);
     axp_die_temp_c10();                              /* enables the ADC channel; first reading is invalid */
+    temperature_sensor_config_t tc = TEMPERATURE_SENSOR_CONFIG_DEFAULT(-10, 80);
+    if (temperature_sensor_install(&tc, &s_tsens) != ESP_OK) {
+        s_tsens = NULL;
+        ESP_LOGW(TAG, "ESP32 temperature sensor unavailable");
+    }
     gpio_config_t boot = {.pin_bit_mask = BIT64(PIN_BOOT), .mode = GPIO_MODE_INPUT, .pull_up_en = 1};
     gpio_config(&boot);
 
